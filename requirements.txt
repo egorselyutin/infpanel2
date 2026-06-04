@@ -48,3 +48,4 @@ urllib3==2.6.3
 watchdog==6.0.0
 beautifulsoup4
 svgpathtools
+xlsxwriter
