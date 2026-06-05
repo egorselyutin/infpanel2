@@ -1,4 +1,4 @@
-
+import streamlit as st
 import pandas as pd
 import os
 import io
@@ -132,6 +132,13 @@ body, .stApp, .stMarkdown, .stText, p, span, div {{
     font-variant-numeric: lining-nums tabular-nums; /* Табличные цифры для всего текста */
 }}
 
+/* Уменьшение высоты stMarkdownContainer */
+div[data-testid="stMarkdownContainer"] {{
+    min-height: 20px !important;
+    padding-top: 0rem !important;
+    padding-bottom: 0rem !important;
+}}
+
 .block-container {{
     padding-top: 0rem !important;
     padding-bottom: 5rem;
@@ -152,7 +159,7 @@ body, .stApp, .stMarkdown, .stText, p, span, div {{
 /* 1. Крупные акценты (Golos UI Bold) */
 .main-title h1 {{
     font-family: var(--font-ui);
-    font-size: 38px !important; /* Слегка уменьшено для ноутбуков */
+    font-size: 38px !important;
     font-weight: 700 !important;
     color: #1a252c !important;
     margin: 0 0 10px 0 !important;
@@ -162,7 +169,7 @@ body, .stApp, .stMarkdown, .stText, p, span, div {{
     align-items: center;
     justify-content: center;
     gap: 12px;
-    letter-spacing: -0.02em; /* Классическая апрош для крупных заголовков */
+    letter-spacing: -0.02em;
 }}
 
 .main-title h1 span.icon {{
@@ -177,7 +184,7 @@ body, .stApp, .stMarkdown, .stText, p, span, div {{
     font-weight: 600 !important;
     color: #626d7a !important;
     text-transform: uppercase !important;
-    letter-spacing: 0.05em !important; /* Разреженный трекинг для капители */
+    letter-spacing: 0.05em !important;
     margin: 0 !important;
     padding: 0 !important;
 }}
@@ -213,15 +220,14 @@ div.stButton > button,
 div.stButton > button p,
 div.stButton > button span {{
     font-family: var(--font-ui) !important;
-    font-size: 16px !important; /* Фиксированный размер для обеих кнопок */
-    font-weight: 550 !important; /* Medium для стабильной ширины */
+    font-size: 16px !important;
+    font-weight: 550 !important;
     font-style: normal !important;
-    line-height: 1.2 !important; /* Убираем лишний межстрочный интервал */
+    line-height: 1.2 !important;
     color: rgb(49, 51, 63) !important;
     text-decoration: none !important;
 }}
 
-/* Убираем дефолтные отступы у текста внутри кнопки Streamlit, чтобы он не съезжал */
 div.stButton > button p {{
     margin: 0 !important;
     padding: 0 !important;
@@ -321,7 +327,7 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
     color: #2980b9 !important; background: rgba(52, 152, 219, 0.1);
     border: 1px solid rgba(52, 152, 219, 0.25); padding: 3px 10px;
     margin-left: 5px; border-radius: 6px; font-weight: 600; display: inline-block;
-    font-family: var(--font-ui); /* Счетчик шрифтом UI, чтобы цифры не прыгали */
+    font-family: var(--font-ui);
 }}
 .content-spacer {{ display: none !important; }}
 </style>
@@ -503,9 +509,18 @@ def load_np_data(file_name):
             return pd.read_excel(matches[0])
     return None
 
+def load_file_to_base64(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    return None
+
 df_regions = load_region_data(EXCEL_FILE)
 df_np_all = load_np_data(NP_FILE)
 svg_content = prepare_svg(SVG_FILE, df_regions)
+
+b64_tfd = load_file_to_base64("Как открыть ТФД.docx")
+b64_fp = load_file_to_base64("Как назначить ФП.docx")
 
 display_df = df_regions.copy() if df_regions is not None else pd.DataFrame()
 if not display_df.empty:
@@ -693,7 +708,6 @@ elif st.session_state.page == 'district':
                     val = row[col]
                     cells += f'<td>{val if pd.notna(val) else ""}</td>'
                 
-                # Кастомный инпут для "Открыть ТФД"
                 cells += (
                     f'<td style="text-align:center; vertical-align:middle;">'
                     f'<div style="display:inline-flex; align-items:stretch; height:28px;">'
@@ -706,7 +720,6 @@ elif st.session_state.page == 'district':
                     f'</div></div></td>'
                 )
                 
-                # Кастомный инпут для "Назначить ФП"
                 cells += (
                     f'<td style="text-align:center; vertical-align:middle;">'
                     f'<div style="display:inline-flex; align-items:stretch; height:28px;">'
@@ -757,10 +770,45 @@ h3 {{
 }}
 .caption {{ font-family: var(--font-text); font-size: 13px; color: #666; margin-bottom: 8px; }}
 
-/* Интерфейс (Инпуты и кнопки - Golos UI Medium) */
 input, button {{
     font-family: var(--font-ui) !important;
     font-variant-numeric: lining-nums tabular-nums;
+}}
+
+.buttons-container {{
+    display: flex;
+    justify-content: space-between;
+    margin-top: 45px;
+    margin-bottom: 20px;
+}}
+.portal-btn {{
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 300px !important; min-width: 300px !important; max-width: 300px !important;
+    height: 90px !important; min-height: 90px !important; max-height: 90px !important;
+    background-color: rgb(255, 255, 255) !important;
+    border: 1px solid rgba(49, 51, 63, 0.2) !important;
+    border-radius: 12px !important;
+    box-shadow: rgba(0, 0, 0, 0.05) 0px 1px 2px 0px !important;
+    margin: 0 !important; padding: 0 !important;
+    box-sizing: border-box !important;
+    transition: border-color 0.2s, color 0.2s, background-color 0.2s, transform 0.1s !important;
+    user-select: none !important; cursor: pointer !important;
+    text-decoration: none !important;
+    font-family: var(--font-ui) !important;
+    font-size: 16px !important;
+    font-weight: 550 !important;
+    font-style: normal !important;
+    line-height: 1.2 !important;
+    color: rgb(49, 51, 63) !important;
+}}
+.portal-btn:hover {{
+    border-color: rgb(255, 75, 75) !important; color: rgb(255, 75, 75) !important;
+    background-color: rgb(255, 255, 255) !important;
+}}
+.portal-btn:active {{
+    background-color: rgb(255, 75, 75) !important; color: white !important; transform: translateY(2px) !important;
 }}
 </style>
 """
@@ -776,6 +824,15 @@ input, button {{
 </table>
 """
 
+            buttons_html = ""
+            if b64_tfd or b64_fp:
+                buttons_html = '<div class="buttons-container">'
+                if b64_tfd:
+                    buttons_html += f'<a class="portal-btn" href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64_tfd}" download="Как открыть ТФД.docx">📄 Как открыть ТФД</a>'
+                if b64_fp:
+                    buttons_html += f'<a class="portal-btn" href="data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{b64_fp}" download="Как назначить ФП.docx">📄 Как назначить ФП</a>'
+                buttons_html += '</div>'
+
             full_html = f"""
 {table_css}
 <table id="districtTable">
@@ -783,6 +840,7 @@ input, button {{
   <tbody><tr>{dist_cells}</tr></tbody>
 </table>
 {np_section_html}
+{buttons_html}
 <script>
 const kfdBase = {kfd_base_val};
 
@@ -798,7 +856,16 @@ function makeSortable(tableId) {{
     headers.forEach((header, index) => {{
         if (header.dataset.sortInitialized === "true") return;
         header.dataset.sortInitialized = "true";
+        
+        // Отключаем сортировку для колонок "Открыть ТФД" и "Назначить ФП"
+        const headerText = header.innerText.trim();
+        if (headerText === "Открыть ТФД" || headerText === "Назначить ФП") {{
+            header.style.cursor = "default";
+            return;
+        }}
+        
         let asc = true;
+        header.style.cursor = "pointer";
         header.onclick = () => {{
             const tbody = table.querySelector("tbody");
             const rows = Array.from(tbody.querySelectorAll("tr"));
@@ -916,7 +983,7 @@ function recalcSums() {{
         bonusWeightFp = 1;
     }}
 
-    let KoeffNeed = (100-kfdBase)/100; /* К нужд*/
+    let KoeffNeed = (100-kfdBase)/100;
 
     let predictedBonus = KoeffNeed*((sumTfd * bonusWeightTfd) + (sumFp * bonusWeightFp));
     let predictedKfd = kfdBase + predictedBonus;
@@ -942,7 +1009,7 @@ setTimeout(sendHeight, 600);
 setTimeout(sendHeight, 1200);
 </script>
 """
-            iframe_h = 55 + 50 + n_np * 38 + 180
+            iframe_h = 55 + 50 + n_np * 38 + 314
             components.html(full_html, height=iframe_h, scrolling=False)
 
 # =============================================================================
