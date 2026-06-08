@@ -114,42 +114,6 @@ else:
         st.session_state.selected_region = None
 
 # =============================================================================
-# 3.5 ИНТЕГРАЦИЯ ЯНДЕКС.МЕТРИКИ (С КОРРЕКТНЫМ ОБХОДОМ ОГРАНИЧЕНИЙ IFRAME)
-# =============================================================================
-# Формируем виртуальный URL на стороне сервера Python, чтобы Метрика видела переходы
-base_portal_url = "https://infpanel.streamlit.app"
-if st.session_state.get('page') == 'district' and st.session_state.get('selected_region'):
-    current_custom_url = f"{base_portal_url}?region={st.session_state.selected_region}"
-else:
-    current_custom_url = base_portal_url
-
-metrika_html = f"""
-<!-- Yandex.Metrika counter -->
-<script type="text/javascript">
-    (function(m,e,t,r,i,k,a){{
-        m[i]=m[i]||function(){{(m[i].a=m[i].a||[]).push(arguments)}};
-        m[i].l=1*new Date();
-        for (var j = 0; j < document.scripts.length; j++) {{if (document.scripts[j].src === r) {{ return; }} }}
-        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
-    }})(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=109718338', 'ym');
-
-    ym(109718338, 'init', {{
-        ssr: true, 
-        webvisor: true, 
-        clickmap: true, 
-        ecommerce: "dataLayer", 
-        url: "{current_custom_url}", 
-        accurateTrackBounce: true, 
-        trackLinks: true
-    }});
-</script>
-<noscript><div><img src="https://mc.yandex.ru/watch/109718338" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
-<!-- /Yandex.Metrika counter -->
-"""
-# Монтируем скрипт как можно выше в структуре DOM, скрывая сам пустой контейнер компонента
-components.html(metrika_html, height=0)
-
-# =============================================================================
 # 4. CSS СТИЛИЗАЦИЯ (ТИПОГРАФИКА GOLOS + ИНТЕРФЕЙС)
 # =============================================================================
 st.markdown(f"""
@@ -484,7 +448,7 @@ def load_region_data(file_path):
     
     # Сразу подготавливаем типы и форматы внутри кэша
     if "Численность населения, чел." in df.columns:
-        df["Численность населения, чел."] = df["Численность населения, чел."] = df["Численность населения, чел."].astype(float).round(0).astype(int)
+        df["Численность населения, чел."] = df["Численность населения, чел."].astype(float).round(0).astype(int)
     if "Действующие ФП" in df.columns:
         df["Действующие ФП"] = df["Действующие ФП"].astype(float).round(1)
     return df
