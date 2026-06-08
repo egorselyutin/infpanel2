@@ -9,35 +9,27 @@ from bs4 import BeautifulSoup
 from svgpathtools import parse_path
 
 # =============================================================================
-# 0. ПОДКЛЮЧЕНИЕ ШРИФТОВ GOLOS (ЧЕРЕЗ BASE64 ДЛЯ НАДЕЖНОСТИ В STREAMLIT)
+# 0. ПОДКЛЮЧЕНИЕ ШРИФТОВ GOLOS (ЧЕРЕЗ СТАТИЧЕСКИЕ URL ДЛЯ ИСКЛЮЧЕНИЯ НАГРУЗКИ)
 # =============================================================================
-@st.cache_data
-def get_font_face(font_name, woff2_path, woff_path, weight_range='100 900', style='normal'):
-    """Генерирует CSS @font-face с внедренным Base64 шрифтом"""
-    font_css = f"@font-face {{\n  font-family: '{font_name}';\n"
-    loaded = False
-    if os.path.exists(woff2_path):
-        with open(woff2_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        font_css += f"  src: url('data:font/woff2;base64,{b64}') format('woff2');\n"
-        loaded = True
-    elif os.path.exists(woff_path):
-        with open(woff_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        font_css += f"  src: url('data:font/woff;base64,{b64}') format('woff');\n"
-        loaded = True
-    
-    if loaded:
-        font_css += f"  font-weight: {weight_range};\n"
-        font_css += f"  font-style: {style};\n"
-        font_css += "  font-display: swap;\n}\n"
-        return font_css
-    return ""
-
-# Пути к шрифтам (убедитесь, что папка fonts находится рядом с app.py)
-font_faces_css = ""
-font_faces_css += get_font_face('Golos UI', 'fonts/Golos UI_VF.woff2', 'fonts/Golos UI_VF.woff')
-font_faces_css += get_font_face('Golos Text', 'fonts/golos-text_vf.woff2', 'fonts/golos-text_vf.woff')
+# Браузер скачает файлы по этим путям один раз и закеширует их. HTML больше не раздувается.
+font_faces_css = """
+@font-face {
+  font-family: 'Golos UI';
+  src: url('/app/static/fonts/Golos UI_VF.woff2') format('woff2'),
+       url('/app/static/fonts/Golos UI_VF.woff') format('woff');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('/app/static/fonts/golos-text_vf.woff2') format('woff2'),
+       url('/app/static/fonts/golos-text_vf.woff') format('woff');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+"""
 
 # =============================================================================
 # 1. ИНИЦИАЛИЗАЦИЯ ХРАНИЛИЩА И СЧЕТЧИКА ПОСЕЩЕНИЙ
@@ -451,7 +443,6 @@ def load_region_data(file_path):
     df = pd.read_excel(file_path)
     df['ID'] = df['ID'].astype(str).str.strip()
     
-    # Сразу подготавливаем типы и форматы внутри кэша
     if "Численность населения, чел." in df.columns:
         df["Численность населения, чел."] = df["Численность населения, чел."].astype(float).round(0).astype(int)
     if "Действующие ФП" in df.columns:
@@ -491,7 +482,6 @@ def load_np_data(file_name):
 
     df = pd.read_excel(target_path)
     
-    # Предварительное форматирование колонок внутри структуры кэша
     if "Численность населения, чел." in df.columns:
         df["Численность населения, чел."] = df["Численность населения, чел."].apply(
             lambda x: int(round(float(x))) if pd.notna(x) else 0)
@@ -567,7 +557,6 @@ def prepare_svg(svg_path, df_regions):
 
 @st.cache_data
 def convert_df_to_excel_b64(df, sheet_name='Sheet1'):
-    """Кэшируемая сборка Excel-файлов для скачивания (устраняет просадки процессора при реранах)"""
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name=sheet_name)
@@ -641,7 +630,6 @@ if st.session_state.page == 'home':
     components.html(sorting_script, height=0)
     st.markdown("<div style='margin-top: 45px;'></div>", unsafe_allow_html=True)
 
-    # Используем эффективный кэш для генерации Excel
     b64 = convert_df_to_excel_b64(display_df, sheet_name='Районы НСО') if not display_df.empty else ""
 
     col1, col2 = st.columns([1, 1])
@@ -720,18 +708,14 @@ elif st.session_state.page == 'district':
 
             df_np_region = pd.DataFrame()
             if df_np_all is None:
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                cwd = os.getcwd()
                 st.error(f"❌ Файл {NP_FILE} не найден.")
             else:
                 mask = df_np_all["Район"].astype(str).str.strip() == str(region_name).strip()
-                # Выбираем только существующие в исходнике целевые колонки
                 available_cols = [c for c in NP_COLS if c in df_np_all.columns]
                 df_np_region = df_np_all[mask][available_cols].copy()
                 if "Населенный пункт" in df_np_region.columns:
                     df_np_region = df_np_region.sort_values("Населенный пункт").reset_index(drop=True)
 
-            # Кэшируемая выгрузка населенных пунктов текущего района
             b64_np_excel = convert_df_to_excel_b64(df_np_region, sheet_name='Населенные пункты') if not df_np_region.empty else ""
 
             cols_to_show = [col for col in region_row.columns if col != 'ID']
