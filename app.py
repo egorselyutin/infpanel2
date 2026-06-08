@@ -344,14 +344,19 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
 
 .footer {{
     width: calc(100% + 10rem) !important; margin-left: -5rem !important; margin-right: -5rem !important;
-    position: relative; background-color: #f8fafc; text-align: center;
-    padding: 30px 20px 35px 20px; font-size: 15px; color: #354555;
-    border-top: 1px solid #e2e8f0; margin-top: 60px; margin-bottom: -5rem !important;
+    position: relative; 
+    background-color: #1e293b; /* Глубокий тёмно-синий фон */
+    text-align: center;
+    padding: 30px 20px 35px 20px; font-size: 15px; 
+    color: #cbd5e1; /* Контрастный светло-серый текст */
+    border-top: 1px solid #334155; margin-top: 60px; margin-bottom: -5rem !important;
     font-family: var(--font-text); font-variant-numeric: lining-nums tabular-nums;
 }}
 .footer strong {{
-    color: #2980b9 !important; background: rgba(52, 152, 219, 0.1);
-    border: 1px solid rgba(52, 152, 219, 0.25); padding: 3px 10px;
+    color: #38bdf8 !important; /* Яркий контрастный голубой текст для цифр */
+    background: rgba(56, 189, 248, 0.15); /* Мягкая голубая подсветка */
+    border: 1px solid rgba(56, 189, 248, 0.4); 
+    padding: 3px 10px;
     margin-left: 5px; border-radius: 6px; font-weight: 600; display: inline-block;
     font-family: var(--font-ui);
 }}
