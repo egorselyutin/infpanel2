@@ -11,20 +11,20 @@ from svgpathtools import parse_path
 # =============================================================================
 # 0. ПОДКЛЮЧЕНИЕ ШРИФТОВ GOLOS (ЧЕРЕЗ СТАТИЧЕСКИЕ URL ДЛЯ ИСКЛЮЧЕНИЯ НАГРУЗКИ)
 # =============================================================================
-# Браузер скачает файлы по этим путям один раз и закеширует их. HTML больше не раздувается.
+# Исправлено: пути изменены на /static/..., а пробелы заменены на дефисы
 font_faces_css = """
 @font-face {
   font-family: 'Golos UI';
-  src: url('/app/static/fonts/Golos UI_VF.woff2') format('woff2'),
-       url('/app/static/fonts/Golos UI_VF.woff') format('woff');
+  src: url('/static/fonts/Golos-UI_VF.woff2') format('woff2'),
+       url('/static/fonts/Golos-UI_VF.woff') format('woff');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: 'Golos Text';
-  src: url('/app/static/fonts/golos-text_vf.woff2') format('woff2'),
-       url('/app/static/fonts/golos-text_vf.woff') format('woff');
+  src: url('/static/fonts/golos-text_vf.woff2') format('woff2'),
+       url('/static/fonts/golos-text_vf.woff') format('woff');
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
