@@ -301,7 +301,7 @@ div.stButton, [data-testid="stColumn"], [data-testid="stVerticalBlock"] {{
     to {{ opacity: 1; transform: scale(1) translateY(0); }}
 }}
 .svg-wrapper {{ width: 100%; display: flex; justify-content: center; align-items: center; margin-top: 10px; margin-bottom: 70px; overflow: visible; }}
-.svg-wrapper svg {{ width: 100%; max-width: 1250px; height: auto !important; display: block; overflow: visible !important; }}
+.svg-wrapper svg {{ width: 100%; max-width: 1100px; height: auto !important; display: block; overflow: visible !important; }}
 .svg-wrapper a {{ text-decoration: none; display: block; outline: none; transform-origin: center !important; transition: transform 0.25s ease, filter 0.25s ease !important; }}
 .svg-wrapper path {{ fill: #e0e0e0; stroke: #ffffff; stroke-width: 1; transition: fill 0.25s ease, stroke 0.25s ease !important; cursor: pointer; }}
 .map-label {{ font-family: var(--font-ui); font-size: 9px; font-weight: 600; fill: #111111; text-anchor: middle; pointer-events: none; user-select: none; paint-order: stroke; stroke: white; stroke-width: 1.5px; stroke-linejoin: round; }}
