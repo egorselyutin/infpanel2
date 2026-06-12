@@ -301,7 +301,7 @@ div.stButton, [data-testid="stColumn"], [data-testid="stVerticalBlock"] {{
     to {{ opacity: 1; transform: scale(1) translateY(0); }}
 }}
 .svg-wrapper {{ width: 100%; display: flex; justify-content: center; align-items: center; margin-top: 10px; margin-bottom: 70px; overflow: visible; }}
-.svg-wrapper svg {{ width: 100%; max-width: 1100px; height: auto !important; display: block; overflow: visible !important; }}
+.svg-wrapper svg {{ width: 60%; max-width: 1200px; height: auto !important; max-height: 10%; display: block; overflow: visible !important; }}
 .svg-wrapper a {{ text-decoration: none; display: block; outline: none; transform-origin: center !important; transition: transform 0.25s ease, filter 0.25s ease !important; }}
 .svg-wrapper path {{ fill: #e0e0e0; stroke: #ffffff; stroke-width: 1; transition: fill 0.25s ease, stroke 0.25s ease !important; cursor: pointer; }}
 .map-label {{ font-family: var(--font-ui); font-size: 9px; font-weight: 600; fill: #111111; text-anchor: middle; pointer-events: none; user-select: none; paint-order: stroke; stroke: white; stroke-width: 1.5px; stroke-linejoin: round; }}
@@ -362,13 +362,9 @@ sorting_script = """
 <script>
 const parentDoc = window.parent.document;
 
-/* Решение проблем со скриншотов image_4f4de0.png и image_4f4dfe.png */
 try {
     if (parentDoc) {
-        // 1. Принудительная установка корректной локали для поисковиков и скринридеров
         parentDoc.documentElement.lang = 'ru';
-        
-        // 2. Динамическое назначение роли главного ориентира (main landmark) контейнеру Streamlit
         const mainAppContainer = parentDoc.querySelector('.block-container') || parentDoc.querySelector('section.main');
         if (mainAppContainer && !mainAppContainer.hasAttribute('role')) {
             mainAppContainer.setAttribute('role', 'main');
@@ -498,7 +494,7 @@ def load_np_data(file_name):
     df = pd.read_excel(target_path)
     
     if "Численность населения, чел." in df.columns:
-        df["Численность населения, чел."] = df["Численность населения, чел."].apply(
+        df["Численность населения, чел."] = df["Численность населения, чел."] .apply(
             lambda x: int(round(float(x))) if pd.notna(x) else 0)
     if "Действующие ФП" in df.columns:
         df["Действующие ФП"] = df["Действующие ФП"].apply(
@@ -749,15 +745,55 @@ elif st.session_state.page == 'district':
             dist_cells += f'<td id="dist-bonus-pred" style="font-weight:600 !important;color:#27ae60;">0.0</td>'
             dist_cells += f'<td id="dist-kfd-pred" style="font-weight:600 !important;color:#27ae60;">{kfd_base_val:.1f}</td>'
 
-            np_header_cols = NP_COLS + ["Открыть ТФД", "Назначить ФП"]
-            np_headers_html = "".join(f"<th>{c}</th>" for c in np_header_cols)
+            # Генерация заголовков таблицы населенных пунктов
+            np_headers_html = "".join(f"<th>{c}</th>" for c in NP_COLS + ["Открыть ТФД", "Назначить ФП"])
+
+            # Интеграция кастомного HTML-кода информационного тултипа для столбца "Бонусный балл"
+            tooltip_layout_html = """
+            <span class="tooltip-container">
+                <span class="tooltip-trigger-icon">ⓘ</span>
+                <span class="tooltip-box-card">
+                <div class="tt-header-title"><span style="color: #2980b9; font-weight: bold; font-size: 20px; margin-right: 5px;">&#8505;</span> Методика расчета показателя «Бонусный балл» (для населенного пункта)</div>                    
+                    <div class="tt-description-text">Показатель рассчитывается для каждого населенного пункта индивидуально на основе его текущего уровня КФД и планируемой активности.</div>
+                    <div class="tt-formula-block">
+                        Бонусный балл НП = Кнужд × (W_тфд × Открыть ТФД + W_фп × Назначить ФП)
+                    </div>
+                    <ul class="tt-unordered-list">
+                        <li><strong>Кнужд</strong> (Коэффициент нужды) = (100 - КФД населенного пункта) / 100</li>
+                        <li><strong>Весовые коэффициенты (W_тфд и W_фп)</strong> определяются диапазоном текущего значения КФД:</li>
+                    </ul>
+                    <table class="tt-embedded-table">
+                        <thead>
+                            <tr>
+                                <th>Текущий КФД НП (в баллах)</th>
+                                <th>Вес «Открыть ТФД» (W_тфд)</th>
+                                <th>Вес «Назначить ФП» (W_фп)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>от 0 до 45</td><td>5</td><td>4</td></tr>
+                            <tr><td>от 46 до 70</td><td>4</td><td>3</td></tr>
+                            <tr><td>от 71 до 85</td><td>3</td><td>2</td></tr>
+                            <tr><td>от 86 до 100</td><td>2</td><td>1</td></tr>
+                        </tbody>
+                    </table>
+                </span>
+            </span>
+            """
+            np_headers_html += f"<th>Бонусный балл {tooltip_layout_html}</th>"
 
             np_rows_html = ""
             for i, row in df_np_region.iterrows():
                 cells = ""
+                kfd_val_np = 0.0
                 for col in NP_COLS:
                     val = row[col]
                     cells += f'<td>{val if pd.notna(val) else ""}</td>'
+                    if col == "КФД, в баллах":
+                        try:
+                            kfd_val_np = float(str(val).replace(',', '.'))
+                        except:
+                            kfd_val_np = 0.0
                 
                 cells += (
                     f'<td style="text-align:center; vertical-align:middle;">'
@@ -782,7 +818,11 @@ elif st.session_state.page == 'district':
                     f'<button onclick="stepFp(event, -0.1)" style="flex:1; width:15px; font-size:8px; line-height:1; padding:0; border:1px solid #ccc; border-top:0.5px solid #ccc; border-radius:0 0 4px 0; background:#f8f9fa; cursor:pointer; color:#555; margin:0;">▼</button>'
                     f'</div></div></td>'
                 )
-                np_rows_html += f'<tr>{cells}</tr>\n'
+                
+                # Ячейка для отображения "Бонусный балл" (стили перенесены в CSS класс np-bonus-val)
+                cells += f'<td class="np-bonus-val">0</td>'
+                
+                np_rows_html += f'<tr data-kfd="{kfd_val_np}">{cells}</tr>\n'
 
             n_np = len(df_np_region)
 
@@ -798,13 +838,14 @@ elif st.session_state.page == 'district':
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{ background: transparent; padding: 0; overflow-x: auto; font-family: var(--font-text); font-variant-numeric: lining-nums tabular-nums; }}
 
-table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; font-family: var(--font-text); }}
+table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; font-family: var(--font-text); overflow: visible !important; }}
 table thead tr th {{
     font-family: var(--font-text); font-weight: 600; font-size: 14px;
-    background-color: #f8f9fa; color: #00; text-align: center;
+    background-color: #f8f9fa; color: #000000; text-align: center;
     border: 1px solid #dcdcdc; padding: 8px 6px; vertical-align: middle;
     cursor: pointer; white-space: normal; user-select: none;
     font-variant-numeric: lining-nums tabular-nums;
+    position: relative;
 }}
 table tbody tr td {{
     font-family: var(--font-text); font-weight: 400; font-size: 14px;
@@ -814,6 +855,14 @@ table tbody tr td {{
 }}
 table tbody tr td:first-child {{ text-align: left; padding-left: 12px; }}
 table tbody tr:hover {{ background-color: #f1f7fc; }}
+
+/* Специфичный стиль для ячеек Бонусного балла НП, чтобы соответствовать вводам ТФД и ФП */
+td.np-bonus-val {{
+    font-family: var(--font-ui) !important;
+    font-weight: 700 !important;
+    color: #27ae60 !important;
+    font-size: 14px !important;
+}}
 
 h3 {{
     font-family: var(--font-ui); font-size: 17px; font-weight: 600; 
@@ -879,13 +928,137 @@ input, button {{
     color: #2980b9 !important;
     border-color: #2980b9 !important;
 }}
+
+/* =============================================================================
+   СТИЛИ ДЛЯ КРУПНОГО ТУЛТИПА МЕТОДИКИ РАСЧЕТА БОНУСНОГО БАЛЛА
+   ============================================================================= */
+.tooltip-container {{
+    position: relative;
+    display: inline-block;
+    margin-left: 5px;
+    cursor: help;
+    vertical-align: middle;
+}}
+
+.tooltip-trigger-icon {{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #e2e8f0;
+    color: #475569;
+    border-radius: 50%;
+    width: 25px;
+    height: 24px;
+    font-size: 16px;
+    font-weight: bold;
+    transition: background-color 0.2s, color 0.2s;
+}}
+
+.tooltip-container:hover .tooltip-trigger-icon {{
+    background-color: #2980b9;
+    color: #ffffff;
+}}
+
+.tooltip-box-card {{
+    display: none;
+    position: absolute;
+    top: 25px;
+    right: 0; /* Раскрытие влево во избежание обрезки экраном */
+    width: 600px;
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1);
+    padding: 18px;
+    z-index: 999999 !important;
+    text-align: left;
+    white-space: normal;
+    color: #334155;
+    font-weight: 400 !important;
+}}
+
+.tooltip-container:hover .tooltip-box-card {{
+    display: block;
+}}
+
+.tt-header-title {{
+    font-family: var(--font-ui);
+    font-weight: 600;
+    font-size: 14px;
+    color: #1e293b;
+    margin-bottom: 8px;
+}}
+
+.tt-description-text {{
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.45;
+    margin-bottom: 12px;
+}}
+
+.tt-formula-block {{
+    background-color: #f0fdf4;
+    border-left: 4px solid #22c55e;
+    padding: 10px 12px;
+    font-family: var(--font-ui);
+    font-weight: 600;
+    font-size: 13.5px;
+    color: #166534;
+    margin-bottom: 12px;
+    border-radius: 0 6px 6px 0;
+}}
+
+.tt-unordered-list {{
+    list-style-type: disc;
+    padding-left: 20px;
+    font-size: 12.5px;
+    color: #334155;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}}
+
+.tt-unordered-list li {{
+    margin-bottom: 5px;
+}}
+
+/* Стили вложенной таблицы в тултипе */
+.tt-embedded-table {{
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-top: 8px !important;
+    font-size: 12px !important;
+}}
+
+.tt-embedded-table th {{
+    background-color: #f8fafc !important;
+    color: #475569 !important;
+    font-weight: 600 !important;
+    border: 1px solid #e2e8f0 !important;
+    padding: 6px 8px !important;
+    font-size: 11.5px !important;
+    cursor: default !important;
+    position: static !important;
+}}
+
+.tt-embedded-table td {{
+    border: 1px solid #e2e8f0 !important;
+    padding: 6px 8px !important;
+    text-align: center !important;
+    color: #334155 !important;
+    font-weight: 400 !important;
+    font-size: 12px !important;
+}}
+
+.tt-embedded-table tbody tr:hover {{
+    background-color: #f8fafc !important;
+}}
 </style>
 """
 
             np_section_html = ""
             if not df_np_region.empty:
                 np_section_html = f"""
-<h3>Населённые пункты</h3>
+<h3>Населённые пункты: {n_np}</h3>
 <div class="caption">(работает сортировка по нажатию на заголовки)</div>
 <table id="npTable">
   <thead><tr>{np_headers_html}</tr></thead>
@@ -919,7 +1092,6 @@ input, button {{
 <script>
 const kfdBase = {kfd_base_val};
 
-/* Решение проблем со скриншотов image_4f4de0.png и image_4f4dfe.png изнутри фрейма карточки */
 try {{
     const parentDoc = window.parent.document;
     if (parentDoc) {{
@@ -945,7 +1117,8 @@ function makeSortable(tableId) {{
         header.dataset.sortInitialized = "true";
         
         const headerText = header.innerText.trim();
-        if (headerText === "Открыть ТФД" || headerText === "Назначить ФП") {{
+        // Изменено условие проверки: используем startsWith, чтобы тултип внутри th не мешал блокировке сортировки
+        if (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.startsWith("Бонусный балл")) {{
             header.style.cursor = "default";
             return;
         }}
@@ -1039,19 +1212,63 @@ function stepFp(e, delta) {{
 
 function recalcSums() {{
     let sumTfd = 0;
-    document.querySelectorAll(".np-open-tfd").forEach(inp => {{
-        let valStr = inp.value;
-        const v = parseInt(valStr);
-        if (!isNaN(v) && v > 0) sumTfd += v;
-    }});
-    
     let sumFp = 0;
-    document.querySelectorAll(".np-assign-fp").forEach(inp => {{
-        let valStr = inp.value.replace(',', '.');
-        const v = parseFloat(valStr);
-        if (!isNaN(v) && v > 0) sumFp += v;
+    let totalPredictedBonus = 0;
+
+    const npRows = document.querySelectorAll("#npTable tbody tr");
+    npRows.forEach(row => {{
+        const tfdInput = row.querySelector('.np-open-tfd');
+        const fpInput = row.querySelector('.np-assign-fp');
+        const bonusCell = row.querySelector('.np-bonus-val'); // Ячейка бонуса НП
+        
+        let tfd = 0;
+        let fp = 0;
+        let kfd = parseFloat(row.getAttribute('data-kfd'));
+        if (isNaN(kfd)) kfd = 0;
+
+        if (tfdInput) {{
+            let v = parseInt(tfdInput.value);
+            if (!isNaN(v) && v > 0) tfd = v;
+        }}
+        if (fpInput) {{
+            let v = parseFloat(fpInput.value.replace(',', '.'));
+            if (!isNaN(v) && v > 0) fp = v;
+        }}
+
+        sumTfd += tfd;
+        sumFp += fp;
+
+        let currentRowBonus = 0;
+
+        // Расчет Бонусного балла НП, если введены ТФД или ФП
+        if (tfd > 0 || fp > 0) {{
+            let KoeffNeed = (100 - kfd) / 100;
+            let weightTfd = 0;
+            let weightFp = 0;
+
+            if (kfd >= 0 && kfd <= 45) {{
+                weightTfd = 5; weightFp = 4;
+            }} else if (kfd >= 46 && kfd <= 70) {{
+                weightTfd = 4; weightFp = 3;
+            }} else if (kfd >= 71 && kfd <= 85) {{
+                weightTfd = 3; weightFp = 2;
+            }} else if (kfd >= 86 && kfd <= 100) {{
+                weightTfd = 2; weightFp = 1;
+            }}
+
+            currentRowBonus = KoeffNeed * (weightTfd * tfd + weightFp * fp);
+        }}
+        
+        totalPredictedBonus += currentRowBonus;
+
+        // Обновление ячейки Бонусный балл в строке
+        if (bonusCell) {{
+            let bonusStr = currentRowBonus.toFixed(1);
+            if (bonusStr.endsWith(".0")) bonusStr = bonusStr.slice(0, -2);
+            bonusCell.innerText = bonusStr;
+        }}
     }});
-    
+
     const tfdCell = document.getElementById("dist-sum-tfd");
     const fpCell  = document.getElementById("dist-sum-fp");
     if (tfdCell) tfdCell.innerText = sumTfd;
@@ -1064,34 +1281,25 @@ function recalcSums() {{
         fpCell.innerText = fpStr;
     }}
 
-    let bonusWeightTfd = 0;
-    let bonusWeightFp = 0;
-
-    if (kfdBase >= 0 && kfdBase <= 45) {{
-        bonusWeightTfd = 5;
-        bonusWeightFp = 4;
-    }} else if (kfdBase >= 46 && kfdBase <= 70) {{
-        bonusWeightTfd = 4;
-        bonusWeightFp = 3;
-    }} else if (kfdBase >= 71 && kfdBase <= 85) {{
-        bonusWeightTfd = 3;
-        bonusWeightFp = 2;
-    }} else if (kfdBase >= 86 && kfdBase <= 100) {{
-        bonusWeightTfd = 2;
-        bonusWeightFp = 1;
-    }}
-
-    let KoeffNeed = (100-kfdBase)/100;
-
-    let predictedBonus = KoeffNeed*((sumTfd * bonusWeightTfd) + (sumFp * bonusWeightFp));
-    let predictedKfd = kfdBase + predictedBonus;
-    if (predictedKfd > 100) {{predictedKfd = 100;}}
-
     const bonusCell = document.getElementById("dist-bonus-pred");
     const kfdPredCell = document.getElementById("dist-kfd-pred");
 
-    if (bonusCell) bonusCell.innerText = predictedBonus.toFixed(1).replace(".0", "");
-    if (kfdPredCell) kfdPredCell.innerText = predictedKfd.toFixed(1).replace(".0", "");
+    // Прогноз бонусного балла равен сумме бонусных баллов НП
+    if (bonusCell) {{
+        let bonusStr = totalPredictedBonus.toFixed(1);
+        if (bonusStr.endsWith(".0")) bonusStr = bonusStr.slice(0, -2);
+        bonusCell.innerText = bonusStr;
+    }}
+
+    // Прогноз КФД = КФД района + Прогноз бонусного балла (не более 100)
+    let predictedKfd = kfdBase + totalPredictedBonus;
+    if (predictedKfd > 100) {{ predictedKfd = 100; }}
+
+    if (kfdPredCell) {{
+        let kfdStr = predictedKfd.toFixed(1);
+        if (kfdStr.endsWith(".0")) kfdStr = kfdStr.slice(0, -2);
+        kfdPredCell.innerText = kfdStr;
+    }}
 }}
 
 setInterval(() => {{
@@ -1107,7 +1315,8 @@ setTimeout(sendHeight, 600);
 setTimeout(sendHeight, 1200);
 </script>
 """
-            iframe_h = 280 + max(1, n_np) * 38 + 130
+            # Добавлено 150px к высоте iframe для безопасного раскрытия крупного тултипа без вертикального скролла
+            iframe_h = 130 + max(1, n_np) * 38 + 280
             components.html(full_html, height=iframe_h, scrolling=False)
 
 # =============================================================================
