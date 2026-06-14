@@ -1,4 +1,4 @@
-
+import streamlit as st
 import pandas as pd
 import os
 import io
@@ -87,7 +87,167 @@ if 'visit_counted' not in st.session_state:
     st.session_state.visit_counted = True
 
 # =============================================================================
-# 3. ФУНКЦИИ НАВИГАЦИИ И ОПРЕДЕЛЕНИЕ ТЕКУЩЕЙ СТРАНИЦЫ
+# 3. ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ ДАННЫХ И СБОРКИ EXCEL (КЭШИРОВАНИЕ)
+# =============================================================================
+def short_region_name(name):
+    name = str(name)
+    replacements = [" муниципальный район", " городской округ", " муниципальный округ", " район"]
+    for rep in replacements:
+        name = name.replace(rep, "")
+    return name.strip()
+
+@st.cache_data
+def load_region_data(file_path):
+    if not os.path.exists(file_path):
+        return None
+    df = pd.read_excel(file_path)
+    df['ID'] = df['ID'].astype(str).str.strip()
+    
+    if "Численность населения, чел." in df.columns:
+        df["Численность населения, чел."] = df["Численность населения, чел."].astype(float).round(0).astype(int)
+    if "Действующие ФП" in df.columns:
+        df["Действующие ФП"] = df["Действующие ФП"].astype(float).round(1)
+    return df
+
+@st.cache_data
+def load_np_data(file_name):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    cwd = os.getcwd()
+    search_dirs = [cwd, script_dir]
+    target_path = None
+    for d in search_dirs:
+        exact = os.path.join(d, file_name)
+        if os.path.exists(exact):
+            target_path = exact
+            break
+    if not target_path:
+        for d in search_dirs:
+            try:
+                for fname in os.listdir(d):
+                    if fname.lower() == file_name.lower():
+                        target_path = os.path.join(d, fname)
+                        break
+                if target_path: break
+            except Exception:
+                pass
+    if not target_path:
+        import glob
+        for d in search_dirs:
+            matches = glob.glob(os.path.join(d, "DB_01*NP*.xlsx"))
+            if matches:
+                target_path = matches[0]
+                break
+    if not target_path:
+        return None
+
+    df = pd.read_excel(target_path)
+    
+    if "Численность населения, чел." in df.columns:
+        df["Численность населения, чел."] = df["Численность населения, чел."] .apply(
+            lambda x: int(round(float(x))) if pd.notna(x) else 0)
+    if "Действующие ФП" in df.columns:
+        df["Действующие ФП"] = df["Действующие ФП"].apply(
+            lambda x: round(float(x), 1) if pd.notna(x) else 0.0)
+    if "КФД, в баллах" in df.columns:
+        df["КФД, в баллах"] = df["КФД, в баллах"].apply(
+            lambda x: round(float(x), 1) if pd.notna(x) else "")
+    return df
+
+@st.cache_data
+def prepare_svg(svg_path, df_regions):
+    with open(svg_path, "r", encoding="utf-8") as f:
+        svg_content = f.read()
+
+    soup = BeautifulSoup(svg_content, "xml")
+    svg = soup.find("svg")
+
+    if svg.has_attr("width"): del svg["width"]
+    if svg.has_attr("height"): del svg["height"]
+    svg["preserveAspectRatio"] = "xMidYMid meet"
+
+    region_map = {}
+    if df_regions is not None and not df_regions.empty:
+        for _, row in df_regions.iterrows():
+            region_map[str(row["ID"]).strip()] = short_region_name(row["Район"])
+
+    paths = svg.find_all("path")
+    for path in paths:
+        if not path.has_attr("id"):
+            continue
+
+        path_id = path["id"].strip()
+        short_name = region_map.get(path_id, path_id)
+
+        title_tag = soup.new_tag("title")
+        title_tag.string = short_name
+        path.append(title_tag)
+
+        center_x, center_y = 0, 0
+        try:
+            d = path.get("d")
+            if d:
+                svg_path_obj = parse_path(d)
+                xmin, xmax, ymin, ymax = svg_path_obj.bbox()
+                center_x = (xmin + xmax) / 2
+                center_y = (ymin + ymax) / 2
+
+                if short_name == "Куйбышевский":
+                    center_y += 18
+                    center_x -= 10
+                elif short_name == "Доволенский":
+                    center_y += 5
+                    center_x += 5
+                elif short_name == "Карасукский":
+                    center_y += 10
+                    center_x += 10
+        except Exception:
+            pass
+
+        parent = path.parent
+        if parent.name != "a":
+            link_tag = soup.new_tag("a", href=f"?region={path_id}", target="_self")
+            path.wrap(link_tag)
+            
+            if center_x != 0 and center_y != 0:
+                text_tag = soup.new_tag("text", x=str(center_x), y=str(center_y), **{"class": "map-label"})
+                text_tag.string = short_name
+                link_tag.append(text_tag)
+
+    return str(svg)
+
+@st.cache_data
+def convert_df_to_excel_b64(df, sheet_name='Sheet1'):
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+        worksheet = writer.sheets[sheet_name]
+        for idx, col in enumerate(df.columns):
+            max_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
+            worksheet.set_column(idx, idx, max_len)
+    return base64.b64encode(buffer.getvalue()).decode()
+
+@st.cache_data
+def load_file_to_base64(file_path):
+    if os.path.exists(file_path):
+        with open(file_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    return None
+
+SVG_FILE = "NSO.svg"
+EXCEL_FILE = "NSO_regions.xlsx"
+NP_FILE = "DB_01_07_2025_NP.xlsx"
+
+df_regions = load_region_data(EXCEL_FILE)
+df_np_all = load_np_data(NP_FILE)
+svg_content = prepare_svg(SVG_FILE, df_regions)
+
+b64_tfd = load_file_to_base64("Как открыть ТФД.zip")
+b64_fp = load_file_to_base64("Как назначить ФП.zip")
+
+display_df = df_regions.copy() if df_regions is not None else pd.DataFrame()
+
+# =============================================================================
+# 4. ФУНКЦИИ НАВИГАЦИИ И ОПРЕДЕЛЕНИЕ ТЕКУЩЕЙ СТРАНИЦЫ (С ВАЛИДАЦИЕЙ ID РАЙОНА)
 # =============================================================================
 def go_home():
     st.session_state.page = 'home'
@@ -95,8 +255,16 @@ def go_home():
     st.query_params.clear()
 
 if has_region_param:
-    st.session_state.selected_region = query_params["region"]
-    st.session_state.page = 'district'
+    requested_region_id = str(query_params["region"]).strip()
+    
+    # Проверяем, существует ли переданный ID в нашей базе данных районов
+    if df_regions is not None and not df_regions.empty and requested_region_id in df_regions['ID'].astype(str).str.strip().values:
+        st.session_state.selected_region = query_params["region"]
+        st.session_state.page = 'district'
+    else:
+        # Если ID некорректный или отсутствует (например, Chanovsk), сбрасываем параметры и уходим на главную
+        go_home()
+        st.rerun()
 else:
     if st.session_state.get('page') == 'district' and not has_region_param:
         go_home()
@@ -105,7 +273,7 @@ else:
         st.session_state.selected_region = None
 
 # =============================================================================
-# 4. CSS СТИЛИЗАЦИЯ (ТИПОГРАФИКА GOLOS + ИНТЕРФЕЙС)
+# 5. CSS СТИЛИЗАЦИЯ (ТИПОГРАФИКА GOLOS + ИНТЕРФЕЙС)
 # =============================================================================
 st.markdown(f"""
 <style>
@@ -356,7 +524,7 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# 5. JS СКРИПТ ДЛЯ ГЛАВНОГО ЭКРАНА (ВКЛЮЧАЯ ОПТИМИЗАЦИЮ ДЛЯ LIGHTHOUSE)
+# 6. JS СКРИПТ ДЛЯ ГЛАВНОГО ЭКРАНА (ВКЛЮЧАЯ ОПТИМИЗАЦИЮ ДЛЯ LIGHTHOUSE)
 # =============================================================================
 sorting_script = """
 <script>
@@ -436,166 +604,6 @@ setInterval(() => {
 }, 500);
 </script>
 """
-
-# =============================================================================
-# 6. ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ ДАННЫХ И СБОРКИ EXCEL (КЭШИРОВАНИЕ)
-# =============================================================================
-def short_region_name(name):
-    name = str(name)
-    replacements = [" муниципальный район", " городской округ", " муниципальный округ", " район"]
-    for rep in replacements:
-        name = name.replace(rep, "")
-    return name.strip()
-
-@st.cache_data
-def load_region_data(file_path):
-    if not os.path.exists(file_path):
-        return None
-    df = pd.read_excel(file_path)
-    df['ID'] = df['ID'].astype(str).str.strip()
-    
-    if "Численность населения, чел." in df.columns:
-        df["Численность населения, чел."] = df["Численность населения, чел."].astype(float).round(0).astype(int)
-    if "Действующие ФП" in df.columns:
-        df["Действующие ФП"] = df["Действующие ФП"].astype(float).round(1)
-    return df
-
-@st.cache_data
-def load_np_data(file_name):
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    cwd = os.getcwd()
-    search_dirs = [cwd, script_dir]
-    target_path = None
-    for d in search_dirs:
-        exact = os.path.join(d, file_name)
-        if os.path.exists(exact):
-            target_path = exact
-            break
-    if not target_path:
-        for d in search_dirs:
-            try:
-                for fname in os.listdir(d):
-                    if fname.lower() == file_name.lower():
-                        target_path = os.path.join(d, fname)
-                        break
-                if target_path: break
-            except Exception:
-                pass
-    if not target_path:
-        import glob
-        for d in search_dirs:
-            matches = glob.glob(os.path.join(d, "DB_01*NP*.xlsx"))
-            if matches:
-                target_path = matches[0]
-                break
-    if not target_path:
-        return None
-
-    df = pd.read_excel(target_path)
-    
-    if "Численность населения, чел." in df.columns:
-        df["Численность населения, чел."] = df["Численность населения, чел."] .apply(
-            lambda x: int(round(float(x))) if pd.notna(x) else 0)
-    if "Действующие ФП" in df.columns:
-        df["Действующие ФП"] = df["Действующие ФП"].apply(
-            lambda x: round(float(x), 1) if pd.notna(x) else 0.0)
-    if "КФД, в баллах" in df.columns:
-        df["КФД, в баллах"] = df["КФД, в баллах"].apply(
-            lambda x: round(float(x), 1) if pd.notna(x) else "")
-    return df
-
-@st.cache_data
-def prepare_svg(svg_path, df_regions):
-    with open(svg_path, "r", encoding="utf-8") as f:
-        svg_content = f.read()
-
-    soup = BeautifulSoup(svg_content, "xml")
-    svg = soup.find("svg")
-
-    if svg.has_attr("width"): del svg["width"]
-    if svg.has_attr("height"): del svg["height"]
-    svg["preserveAspectRatio"] = "xMidYMid meet"
-
-    region_map = {}
-    if df_regions is not None and not df_regions.empty:
-        for _, row in df_regions.iterrows():
-            region_map[str(row["ID"]).strip()] = short_region_name(row["Район"])
-
-    paths = svg.find_all("path")
-    for path in paths:
-        if not path.has_attr("id"):
-            continue
-
-        path_id = path["id"].strip()
-        short_name = region_map.get(path_id, path_id)
-
-        title_tag = soup.new_tag("title")
-        title_tag.string = short_name
-        path.append(title_tag)
-
-        center_x, center_y = 0, 0
-        try:
-            d = path.get("d")
-            if d:
-                svg_path_obj = parse_path(d)
-                xmin, xmax, ymin, ymax = svg_path_obj.bbox()
-                center_x = (xmin + xmax) / 2
-                center_y = (ymin + ymax) / 2
-
-                if short_name == "Куйбышевский":
-                    center_y += 18
-                    center_x -= 10
-                elif short_name == "Доволенский":
-                    center_y += 5
-                    center_x += 5
-                elif short_name == "Карасукский":
-                    center_y += 10
-                    center_x += 10
-        except Exception:
-            pass
-
-        parent = path.parent
-        if parent.name != "a":
-            link_tag = soup.new_tag("a", href=f"?region={path_id}", target="_self")
-            path.wrap(link_tag)
-            
-            if center_x != 0 and center_y != 0:
-                text_tag = soup.new_tag("text", x=str(center_x), y=str(center_y), **{"class": "map-label"})
-                text_tag.string = short_name
-                link_tag.append(text_tag)
-
-    return str(svg)
-
-@st.cache_data
-def convert_df_to_excel_b64(df, sheet_name='Sheet1'):
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-        worksheet = writer.sheets[sheet_name]
-        for idx, col in enumerate(df.columns):
-            max_len = max(df[col].astype(str).map(len).max(), len(str(col))) + 2
-            worksheet.set_column(idx, idx, max_len)
-    return base64.b64encode(buffer.getvalue()).decode()
-
-@st.cache_data
-def load_file_to_base64(file_path):
-    if os.path.exists(file_path):
-        with open(file_path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    return None
-
-SVG_FILE = "NSO.svg"
-EXCEL_FILE = "NSO_regions.xlsx"
-NP_FILE = "DB_01_07_2025_NP.xlsx"
-
-df_regions = load_region_data(EXCEL_FILE)
-df_np_all = load_np_data(NP_FILE)
-svg_content = prepare_svg(SVG_FILE, df_regions)
-
-b64_tfd = load_file_to_base64("Как открыть ТФД.zip")
-b64_fp = load_file_to_base64("Как назначить ФП.zip")
-
-display_df = df_regions.copy() if df_regions is not None else pd.DataFrame()
 
 # =============================================================================
 # СЦЕНАРИЙ №1: ЭКРАН ГЛАВНОЙ СТРАНИЦЫ С КАРТОЙ И ОБЩЕЙ ТАБЛИЦЕЙ
@@ -819,7 +827,7 @@ elif st.session_state.page == 'district':
                     f'</div></div></td>'
                 )
                 
-                # Ячейка для отображения "Бонусный балл" (стили перенесены в CSS класс np-bonus-val)
+                # Ячейка для отображения "Бонусный балл"
                 cells += f'<td class="np-bonus-val">0</td>'
                 
                 np_rows_html += f'<tr data-kfd="{kfd_val_np}">{cells}</tr>\n'
@@ -856,7 +864,6 @@ table tbody tr td {{
 table tbody tr td:first-child {{ text-align: left; padding-left: 12px; }}
 table tbody tr:hover {{ background-color: #f1f7fc; }}
 
-/* Специфичный стиль для ячеек Бонусного балла НП, чтобы соответствовать вводам ТФД и ФП */
 td.np-bonus-val {{
     font-family: var(--font-ui) !important;
     font-weight: 700 !important;
@@ -929,9 +936,6 @@ input, button {{
     border-color: #2980b9 !important;
 }}
 
-/* =============================================================================
-   СТИЛИ ДЛЯ КРУПНОГО ТУЛТИПА МЕТОДИКИ РАСЧЕТА БОНУСНОГО БАЛЛА
-   ============================================================================= */
 .tooltip-container {{
     position: relative;
     display: inline-block;
@@ -963,7 +967,7 @@ input, button {{
     display: none;
     position: absolute;
     top: 25px;
-    right: 0; /* Раскрытие влево во избежание обрезки экраном */
+    right: 0;
     width: 600px;
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
@@ -1021,7 +1025,6 @@ input, button {{
     margin-bottom: 5px;
 }}
 
-/* Стили вложенной таблицы в тултипе */
 .tt-embedded-table {{
     width: 100% !important;
     border-collapse: collapse !important;
@@ -1117,7 +1120,6 @@ function makeSortable(tableId) {{
         header.dataset.sortInitialized = "true";
         
         const headerText = header.innerText.trim();
-        // Изменено условие проверки: используем startsWith, чтобы тултип внутри th не мешал блокировке сортировки
         if (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.startsWith("Бонусный балл")) {{
             header.style.cursor = "default";
             return;
@@ -1219,7 +1221,7 @@ function recalcSums() {{
     npRows.forEach(row => {{
         const tfdInput = row.querySelector('.np-open-tfd');
         const fpInput = row.querySelector('.np-assign-fp');
-        const bonusCell = row.querySelector('.np-bonus-val'); // Ячейка бонуса НП
+        const bonusCell = row.querySelector('.np-bonus-val');
         
         let tfd = 0;
         let fp = 0;
@@ -1240,7 +1242,6 @@ function recalcSums() {{
 
         let currentRowBonus = 0;
 
-        // Расчет Бонусного балла НП, если введены ТФД или ФП
         if (tfd > 0 || fp > 0) {{
             let KoeffNeed = (100 - kfd) / 100;
             let weightTfd = 0;
@@ -1261,7 +1262,6 @@ function recalcSums() {{
         
         totalPredictedBonus += currentRowBonus;
 
-        // Обновление ячейки Бонусный балл в строке
         if (bonusCell) {{
             let bonusStr = currentRowBonus.toFixed(1);
             if (bonusStr.endsWith(".0")) bonusStr = bonusStr.slice(0, -2);
@@ -1284,14 +1284,12 @@ function recalcSums() {{
     const bonusCell = document.getElementById("dist-bonus-pred");
     const kfdPredCell = document.getElementById("dist-kfd-pred");
 
-    // Прогноз бонусного балла равен сумме бонусных баллов НП
     if (bonusCell) {{
         let bonusStr = totalPredictedBonus.toFixed(1);
         if (bonusStr.endsWith(".0")) bonusStr = bonusStr.slice(0, -2);
         bonusCell.innerText = bonusStr;
     }}
 
-    // Прогноз КФД = КФД района + Прогноз бонусного балла (не более 100)
     let predictedKfd = kfdBase + totalPredictedBonus;
     if (predictedKfd > 100) {{ predictedKfd = 100; }}
 
@@ -1315,7 +1313,6 @@ setTimeout(sendHeight, 600);
 setTimeout(sendHeight, 1200);
 </script>
 """
-            # Добавлено 150px к высоте iframe для безопасного раскрытия крупного тултипа без вертикального скролла
             iframe_h = 130 + max(1, n_np) * 38 + 280
             components.html(full_html, height=iframe_h, scrolling=False)
 
