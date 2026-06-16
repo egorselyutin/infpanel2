@@ -1116,7 +1116,8 @@ function makeSortable(tableId) {{
         header.dataset.sortInitialized = "true";
         
         const headerText = header.innerText.trim();
-        if (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.includes("Бонусный балл") || headerText.includes("Прогноз")) {{
+        // Блокируем сортировку интерактивных полей только для таблицы населенных пунктов        
+        if (tableId === "npTable" && (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.startsWith("Бонусный балл"))) {{
             header.style.cursor = "default";
             return;
         }}
