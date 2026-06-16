@@ -143,7 +143,7 @@ def load_np_data(file_name):
     df = pd.read_excel(target_path)
     
     if "Численность населения, чел." in df.columns:
-        df["Численность населения, чел."] = df["Численность населения, чел."] .apply(
+        df["Численность населения, чел."] = df["Численность населения, чел."].apply(
             lambda x: int(round(float(x))) if pd.notna(x) else 0)
     if "Действующие ФП" in df.columns:
         df["Действующие ФП"] = df["Действующие ФП"].apply(
@@ -257,12 +257,10 @@ def go_home():
 if has_region_param:
     requested_region_id = str(query_params["region"]).strip()
     
-    # Проверяем, существует ли переданный ID в нашей базе данных районов
     if df_regions is not None and not df_regions.empty and requested_region_id in df_regions['ID'].astype(str).str.strip().values:
         st.session_state.selected_region = query_params["region"]
         st.session_state.page = 'district'
     else:
-        # Если ID некорректный или отсутствует (например, Chanovsk), сбрасываем параметры и уходим на главную
         go_home()
         st.rerun()
 else:
@@ -504,16 +502,16 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
 .footer {{
     width: calc(100% + 10rem) !important; margin-left: -5rem !important; margin-right: -5rem !important;
     position: relative; 
-    background-color: #1e293b; /* Глубокий тёмно-синий фон */
+    background-color: #1e293b; 
     text-align: center;
     padding: 30px 20px 35px 20px; font-size: 15px; 
-    color: #cbd5e1; /* Контрастный светло-серый текст */
+    color: #cbd5e1; 
     border-top: 1px solid #334155; margin-top: 60px; margin-bottom: -5rem !important;
     font-family: var(--font-text); font-variant-numeric: lining-nums tabular-nums;
 }}
 .footer strong {{
-    color: #38bdf8 !important; /* Яркий контрастный голубой текст для цифр */
-    background: rgba(56, 189, 248, 0.15); /* Мягкая голубая подсветка */
+    color: #38bdf8 !important; 
+    background: rgba(56, 189, 248, 0.15); 
     border: 1px solid rgba(56, 189, 248, 0.4); 
     padding: 3px 10px;
     margin-left: 5px; border-radius: 6px; font-weight: 600; display: inline-block;
@@ -524,7 +522,7 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# 6. JS СКРИПТ ДЛЯ ГЛАВНОГО ЭКРАНА (ВКЛЮЧАЯ ОПТИМИЗАЦИЮ ДЛЯ LIGHTHOUSE)
+# 6. JS СКРИПТ ДЛЯ ГЛАВНОГО ЭКРАНА
 # =============================================================================
 sorting_script = """
 <script>
@@ -538,15 +536,14 @@ try {
             mainAppContainer.setAttribute('role', 'main');
         }
     }
-} catch (e) {
-    console.log("Accessibility tuning handled setup successfully.");
-}
+} catch (e) {}
 
 function makeSortable(tableId) {
     const table = parentDoc.getElementById(tableId);
-    if (!table) return;
+    if (!table || !table.tBodies || !table.tBodies[0]) return;
 
-    const headers = table.querySelectorAll("th");
+    const tbody = table.tBodies[0];
+    const headers = Array.from(table.tHead.rows[0].cells);
     headers.forEach((header, index) => {
         if (header.dataset.sortInitialized === "true") return;
         header.dataset.sortInitialized = "true";
@@ -555,12 +552,12 @@ function makeSortable(tableId) {
         header.style.cursor = "pointer";
 
         header.onclick = () => {
-            const tbody = table.querySelector("tbody");
-            const rows = Array.from(tbody.querySelectorAll("tr"));
+            const rows = Array.from(tbody.rows);
 
             rows.sort((a, b) => {
-                let v1 = a.children[index].innerText.trim();
-                let v2 = b.children[index].innerText.trim();
+                if (!a.cells[index] || !b.cells[index]) return 0;
+                let v1 = a.cells[index].innerText.trim();
+                let v2 = b.cells[index].innerText.trim();
                 let n1 = parseFloat(v1.replace(",", "."));
                 let n2 = parseFloat(v2.replace(",", "."));
                 if (!isNaN(n1) && !isNaN(n2)) return asc ? n1 - n2 : n2 - n1;
@@ -753,10 +750,8 @@ elif st.session_state.page == 'district':
             dist_cells += f'<td id="dist-bonus-pred" style="font-weight:600 !important;color:#27ae60;">0.0</td>'
             dist_cells += f'<td id="dist-kfd-pred" style="font-weight:600 !important;color:#27ae60;">{kfd_base_val:.1f}</td>'
 
-            # Генерация заголовков таблицы населенных пунктов
             np_headers_html = "".join(f"<th>{c}</th>" for c in NP_COLS + ["Открыть ТФД", "Назначить ФП"])
 
-            # Интеграция кастомного HTML-кода информационного тултипа для столбца "Бонусный балл"
             tooltip_layout_html = """
             <span class="tooltip-container">
                 <span class="tooltip-trigger-icon">ⓘ</span>
@@ -827,9 +822,7 @@ elif st.session_state.page == 'district':
                     f'</div></div></td>'
                 )
                 
-                # Ячейка для отображения "Бонусный балл"
                 cells += f'<td class="np-bonus-val">0</td>'
-                
                 np_rows_html += f'<tr data-kfd="{kfd_val_np}">{cells}</tr>\n'
 
             n_np = len(df_np_region)
@@ -851,7 +844,7 @@ table thead tr th {{
     font-family: var(--font-text); font-weight: 600; font-size: 14px;
     background-color: #f8f9fa; color: #000000; text-align: center;
     border: 1px solid #dcdcdc; padding: 8px 6px; vertical-align: middle;
-    cursor: pointer; white-space: normal; user-select: none;
+    white-space: normal; user-select: none;
     font-variant-numeric: lining-nums tabular-nums;
     position: relative;
 }}
@@ -1113,14 +1106,17 @@ function sendHeight() {{
 
 function makeSortable(tableId) {{
     const table = document.getElementById(tableId);
-    if (!table) return;
-    const headers = table.querySelectorAll("th");
+    if (!table || !table.tBodies || !table.tBodies[0]) return;
+    
+    // ГАРАНТИЯ: работаем ТОЛЬКО со строками основного tbody таблицы
+    const tbody = table.tBodies[0];
+    const headers = Array.from(table.tHead.rows[0].cells);
     headers.forEach((header, index) => {{
         if (header.dataset.sortInitialized === "true") return;
         header.dataset.sortInitialized = "true";
         
         const headerText = header.innerText.trim();
-        if (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.startsWith("Бонусный балл")) {{
+        if (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.includes("Бонусный балл") || headerText.includes("Прогноз")) {{
             header.style.cursor = "default";
             return;
         }}
@@ -1128,34 +1124,40 @@ function makeSortable(tableId) {{
         let asc = true;
         header.style.cursor = "pointer";
         header.onclick = () => {{
-            const tbody = table.querySelector("tbody");
-            const rows = Array.from(tbody.querySelectorAll("tr"));
+            const rows = Array.from(tbody.rows);
+            
             rows.sort((a, b) => {{
-                let v1 = a.children[index].innerText.trim();
-                let v2 = b.children[index].innerText.trim();
+                if (!a.cells[index] || !b.cells[index]) return 0;
+                let v1 = a.cells[index].innerText.trim();
+                let v2 = b.cells[index].innerText.trim();
                 let n1 = parseFloat(v1.replace(",", "."));
                 let n2 = parseFloat(v2.replace(",", "."));
                 if (!isNaN(n1) && !isNaN(n2)) return asc ? n1 - n2 : n2 - n1;
                 return asc ? v1.localeCompare(v2, "ru") : v2.localeCompare(v1, "ru");
             }});
+            
             rows.forEach(row => tbody.appendChild(row));
+            
             headers.forEach(h => {{
                 const arr = h.querySelector(".sort-arrow");
                 if (arr) arr.remove();
                 h.style.backgroundColor = "#f8f9fa";
             }});
+            
             header.style.backgroundColor = asc ? "#e8f8f5" : "#fdedec";
             const arrowSpan = document.createElement("span");
             arrowSpan.className = "sort-arrow";
             arrowSpan.innerHTML = asc ? "&#9650;" : "&#9660;";
             arrowSpan.style.color = asc ? "#27ae60" : "#e74c3c";
             header.appendChild(arrowSpan);
+            
             rows.forEach(row => {{
                 row.classList.remove("pulse-highlight");
                 void row.offsetWidth;
                 row.classList.add("pulse-highlight");
                 setTimeout(() => row.classList.remove("pulse-highlight"), 600);
             }});
+            
             asc = !asc;
             sendHeight();
         }};
@@ -1217,7 +1219,10 @@ function recalcSums() {{
     let sumFp = 0;
     let totalPredictedBonus = 0;
 
-    const npRows = document.querySelectorAll("#npTable tbody tr");
+    const npTable = document.getElementById("npTable");
+    if (!npTable || !npTable.tBodies || !npTable.tBodies[0]) return;
+    const npRows = Array.from(npTable.tBodies[0].rows);
+
     npRows.forEach(row => {{
         const tfdInput = row.querySelector('.np-open-tfd');
         const fpInput = row.querySelector('.np-assign-fp');
