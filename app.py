@@ -548,6 +548,19 @@ div.stButton, [data-testid="stColumn"], [data-testid="stVerticalBlock"] {{
 .svg-wrapper a:hover {{ transform: scale(1.015) translateY(-2px) !important; filter: drop-shadow(0px 6px 10px rgba(0, 0, 0, 0.3)) !important; position: relative; z-index: 9999 !important; }}
 .svg-wrapper a:hover path {{ fill: #3498db !important; stroke: #1f5f8b !important; }}
 
+/* Легенда карты */
+.map-legend {{ margin-top: 20px; margin-bottom: 25px; padding: 0 10px; }}
+.legend-title {{ font-family: var(--font-ui); font-size: 16px; font-weight: 600; color: #1a252c; margin-bottom: 10px; text-align: center; }}
+.legend-items {{ 
+    display: flex; 
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 55px;
+}}
+.legend-item {{ display: flex; align-items: center; gap: 6px; }}
+.legend-color-box {{ width: 20px; height: 14px; border: 1px solid #999; border-radius: 3px; flex-shrink: 0; }}
+.legend-text {{ font-family: var(--font-text); font-size: 14px; color: #333; }}
+
 .indicators-container {{ padding: 10px 5px; }}
 .indicator-section-title {{ text-align: center; font-family: var(--font-ui); font-size: 18px; font-weight: 600; color: #1a252c; margin: 0px 0 12px 0; }}
 .indicator-section-subtitle-italic {{ text-align: center; font-family: var(--font-text); font-size: 14px; font-style: italic; color: #626d7a; margin: -8px 0 12px 0; }}
@@ -817,11 +830,41 @@ if st.session_state.page == 'home':
         svg_class = ""
 
     animated_svg = svg_content.replace('<svg ', f'<svg class="{svg_class}" ')
+
+    legend_html = """
+    <div class="map-legend">
+        <div class="legend-title">Уровень потребности в развитии дистанционного банковского обслуживания (%)</div>
+        <div class="legend-items">
+            <div class="legend-item">
+                <div class="legend-color-box" style="background:#88A945;"></div>
+                <span class="legend-text">Низкий (от 0 до 10)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color-box" style="background:#D8E4BC;"></div>
+                <span class="legend-text">Ниже среднего (от 11 до 15)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color-box" style="background:#FFFFCC;"></div>
+                <span class="legend-text">Средний (от 16 до 20)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color-box" style="background:#FCD5B4;"></div>
+                <span class="legend-text">Выше среднего (от 21 до 30)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color-box" style="background:#E6B8B7;"></div>
+                <span class="legend-text">Высокий (от 31 до 100)</span>
+            </div>
+        </div>
+    </div>
+    """
+
     indicators_html = build_indicators_html(df_indicators)
 
     left_col, spacer, right_col = st.columns([3, 0.2, 1.8])
     with left_col:
         st.markdown(f'<div class="svg-wrapper">{animated_svg}</div>', unsafe_allow_html=True)
+        st.markdown(legend_html, unsafe_allow_html=True)
     with spacer:
         st.empty()
     with right_col:
@@ -998,7 +1041,7 @@ elif st.session_state.page == 'district':
             st.markdown("""
             <div style="display: flex; flex-direction: column; align-items: center; margin-top: 40px; margin-bottom: 40px;">
                 <div style="font-family: var(--font-ui); font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #1a252c;">
-                    Вклад элементов созданной альтернативной инфраструктуры в показатель финансовой доступности
+                    Влияние альтернативной инфраструктуры на уровень потребности в ДБО
                 </div>
                 <div style="max-width: 900px; width: 100%;">
                     <table id="weights" class="weights-table" style="width: 100% !important;">
@@ -1006,7 +1049,7 @@ elif st.session_state.page == 'district':
                         <!-- Добавляем новую группирующую строку -->
                         <tr style="background-color: #f1f5f9;">
                             <th colspan="2">Классификация уровня финансовой доступности</th>
-                            <th colspan="2">Вклад элементов альтернативной инфраструктуры</th>
+                            <th colspan="2">Влияние альтернативной инфраструктуры</th>
                         </tr>
                             <tr>
                                 <th>Уровень</th>
@@ -1016,7 +1059,7 @@ elif st.session_state.page == 'district':
                             </tr>
                         </thead>
                         <tbody>
-                            <tr style="color: #27ae60; font-weight: 600;"><td>Хороший</td><td>86 – 100</td><td>0,5%</td><td>2%</td></tr>
+                            <tr style="color: #27ae60; font-weight: 600;"><td>Хороший</td><td>86 – 100</td><td>0.5%</td><td>2%</td></tr>
                             <tr style="color: #2980b9; font-weight: 600;"><td>Выше среднего</td><td>66 – 85</td><td>1%</td><td>3%</td></tr>
                             <tr style="color: #d35400; font-weight: 600;"><td>Средний</td><td>46 – 65</td><td>2.5%</td><td>4%</td></tr>
                             <tr style="color: #c0392b; font-weight: 600;"><td>Ниже среднего</td><td>31 – 45</td><td>3%</td><td>5%</td></tr>
