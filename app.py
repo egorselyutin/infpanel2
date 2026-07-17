@@ -71,8 +71,20 @@ try:
 except Exception:
     session_id = "fallback_session"
 
+def set_date_param():
+    """Callback для сохранения выбранной даты в URL при изменении селектора"""
+    if "selected_date" in st.session_state:
+        st.query_params["date"] = st.session_state.selected_date
+
 query_params = st.query_params
 has_region_param = "region" in query_params
+
+# Считываем текущую дату из URL (если её нет — ставим по умолчанию)
+current_date = query_params.get("date", "01.07.2025")
+if isinstance(current_date, list):
+    current_date = current_date[0]
+
+# Синхронизируем стейт виджета с датой из URL (чтобы не было лишних перезагрузок)
 
 if 'visit_counted' not in st.session_state:
     if not has_region_param:
@@ -133,7 +145,7 @@ def load_np_data(file_name):
     if not target_path:
         import glob
         for d in search_dirs:
-            matches = glob.glob(os.path.join(d, "DB_01*NP*.xlsx"))
+            matches = glob.glob(os.path.join(d, "DB_*_NP.xlsx"))
             if matches:
                 target_path = matches[0]
                 break
@@ -145,16 +157,29 @@ def load_np_data(file_name):
     if "Численность населения, чел." in df.columns:
         df["Численность населения, чел."] = df["Численность населения, чел."].apply(
             lambda x: int(round(float(x))) if pd.notna(x) else 0)
-    if "Действующие ФП" in df.columns:
-        df["Действующие ФП"] = df["Действующие ФП"].apply(
-            lambda x: round(float(x), 1) if pd.notna(x) else 0.0)
-    if "КФД, в баллах" in df.columns:
-        df["КФД, в баллах"] = df["КФД, в баллах"].apply(
-            lambda x: round(float(x), 1) if pd.notna(x) else "")
     return df
 
 @st.cache_data
-def prepare_svg(svg_path, df_regions):
+def load_main_indicators(file_path):
+    if not os.path.exists(file_path):
+        return None
+    df = pd.read_excel(file_path, header=None)
+    return df
+
+@st.cache_data
+def load_nso_summary_data(file_path):
+    """Загрузка общих показателей по НСО из файла NSO_ДД.ММ.ГГГГ.xlsx"""
+    if not os.path.exists(file_path):
+        return None
+    df = pd.read_excel(file_path)
+    if "Численность населения, чел." in df.columns:
+        df["Численность населения, чел."] = df["Численность населения, чел."].astype(float).round(0).astype(int)
+    if "Действующие ФП" in df.columns:
+        df["Действующие ФП"] = df["Действующие ФП"].astype(float).round(1)
+    return df
+
+@st.cache_data
+def prepare_svg(svg_path, df_regions, current_date):
     with open(svg_path, "r", encoding="utf-8") as f:
         svg_content = f.read()
 
@@ -205,7 +230,7 @@ def prepare_svg(svg_path, df_regions):
 
         parent = path.parent
         if parent.name != "a":
-            link_tag = soup.new_tag("a", href=f"?region={path_id}", target="_self")
+            link_tag = soup.new_tag("a", href=f"?region={path_id}&date={current_date}", target="_self")
             path.wrap(link_tag)
             
             if center_x != 0 and center_y != 0:
@@ -233,13 +258,22 @@ def load_file_to_base64(file_path):
             return base64.b64encode(f.read()).decode()
     return None
 
-SVG_FILE = "NSO.svg"
-EXCEL_FILE = "NSO_regions.xlsx"
-NP_FILE = "DB_01_07_2025_NP.xlsx"
+# =============================================================================
+# ДИНАМИЧЕСКОЕ ОПРЕДЕЛЕНИЕ ФАЙЛОВ
+# =============================================================================
+date_suffix = f"_{current_date}"
+
+SVG_FILE = f"NSO{date_suffix}.svg"
+EXCEL_FILE = f"NSO_regions{date_suffix}.xlsx"
+NP_FILE = f"DB{date_suffix}_NP.xlsx"
+MAIN_INDICATORS_FILE = f"main_indicators{date_suffix}.xlsx"
+NSO_SUMMARY_FILE = f"NSO{date_suffix}.xlsx"
 
 df_regions = load_region_data(EXCEL_FILE)
 df_np_all = load_np_data(NP_FILE)
-svg_content = prepare_svg(SVG_FILE, df_regions)
+df_indicators = load_main_indicators(MAIN_INDICATORS_FILE)
+df_nso_summary = load_nso_summary_data(NSO_SUMMARY_FILE)
+svg_content = prepare_svg(SVG_FILE, df_regions, current_date)
 
 b64_tfd = load_file_to_base64("Как открыть ТФД.zip")
 b64_fp = load_file_to_base64("Как назначить ФП.zip")
@@ -247,12 +281,13 @@ b64_fp = load_file_to_base64("Как назначить ФП.zip")
 display_df = df_regions.copy() if df_regions is not None else pd.DataFrame()
 
 # =============================================================================
-# 4. ФУНКЦИИ НАВИГАЦИИ И ОПРЕДЕЛЕНИЕ ТЕКУЩЕЙ СТРАНИЦЫ (С ВАЛИДАЦИЕЙ ID РАЙОНА)
+# 4. ФУНКЦИИ НАВИГАЦИИ И ОПРЕДЕЛЕНИЯ ТЕКУЩЕЙ СТРАНИЦЫ
 # =============================================================================
 def go_home():
     st.session_state.page = 'home'
     st.session_state.selected_region = None
-    st.query_params.clear()
+    if "region" in query_params:
+        del query_params["region"]
 
 if has_region_param:
     requested_region_id = str(query_params["region"]).strip()
@@ -271,26 +306,23 @@ else:
         st.session_state.selected_region = None
 
 # =============================================================================
-# 5. CSS СТИЛИЗАЦИЯ (ТИПОГРАФИКА GOLOS + ИНТЕРФЕЙС)
+# 5. CSS СТИЛИЗАЦИЯ
 # =============================================================================
 st.markdown(f"""
 <style>
 /* Внедрение шрифтов */
 {font_faces_css}
 
-/* Базовые переменные дизайн-системы */
 :root {{
     --font-ui: 'Golos UI', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     --font-text: 'Golos Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }}
 
-/* Глобальный сброс и применение основного шрифта */
 body, .stApp, .stMarkdown, .stText, p, span, div {{
     font-family: var(--font-text);
     font-variant-numeric: lining-nums tabular-nums;
 }}
 
-/* Уменьшение высоты stMarkdownContainer */
 div[data-testid="stMarkdownContainer"] {{
     min-height: 20px !important;
     padding-top: 0rem !important;
@@ -308,19 +340,18 @@ div[data-testid="stMarkdownContainer"] {{
 .header-container {{
     background: #ffffff;
     border-radius: 16px;
-    padding: 24px 20px;
+    padding: 24px 20px 10px 20px;
     margin-top: -5px !important;
     margin-bottom: 20px;
     text-align: center;
 }}
 
-/* 1. Крупные акценты (Golos UI Bold) */
 .main-title h1 {{
     font-family: var(--font-ui);
     font-size: 38px !important;
     font-weight: 700 !important;
     color: #1a252c !important;
-    margin: 0 0 10px 0 !important;
+    margin: 0 0 15px 0 !important;
     padding: 0 !important;
     line-height: 1.3 !important;
     display: inline-flex;
@@ -335,16 +366,57 @@ div[data-testid="stMarkdownContainer"] {{
     filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
 }}
 
-/* 2. Интерфейсные мета-данные (Golos UI SemiBold) */
-.sub-title h2 {{
+.sub-title {{
+    text-align: center !important;
+}}
+.sub-title h4 {{
     font-family: var(--font-ui);
-    font-size: 16px !important;
+    font-size: 18px !important;
     font-weight: 600 !important;
-    color: #626d7a !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.05em !important;
-    margin: 0 !important;
+    color: #1a252c !important;
+    margin: 0 0 5px 0 !important;
     padding: 0 !important;
+    text-align: center !important;
+}}
+.sub-title p {{
+    font-size: 14px !important;
+    color: #626d7a !important;
+    margin: 0 !important;
+    text-align: center !important;
+}}
+
+/* Стилизация селектора даты (убран мигающий курсор и выделение текста) */
+.date-picker-wrapper [data-baseweb="select"] {{
+    background-color: #f8f9fa !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    font-family: var(--font-ui) !important;
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    color: #1a252c !important;
+    height: 40px !important;
+    padding-top: 8px !important;
+    padding-left: 10px !important;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    cursor: pointer !important;
+    caret-color: transparent !important;
+    user-select: none !important;
+}}
+.date-picker-wrapper [data-baseweb="select"]:hover {{
+    border-color: #2980b9 !important;
+}}
+.date-picker-wrapper [data-baseweb="select"] svg {{
+    fill: #1a252c !important;
+}}
+.date-picker-wrapper [data-baseweb="select"] input {{
+    cursor: pointer !important;
+    caret-color: transparent !important;
+    -webkit-user-select: none;  
+    -moz-user-select: none; 
+    -ms-user-select: none; 
+    pointer-events: none !important;
+    user-select: none !important;     
 }}
 
 .left-align-container, .right-align-container {{
@@ -354,7 +426,6 @@ div[data-testid="stMarkdownContainer"] {{
 .left-align-container {{ justify-content: flex-start; }}
 .right-align-container {{ justify-content: flex-end; }}
 
-/* 2. Кнопки и интерактив (Golos UI Medium) */
 .portal-btn, div.stButton > button {{
     display: inline-flex !important;
     align-items: center !important;
@@ -426,8 +497,13 @@ div.stButton, [data-testid="stColumn"], [data-testid="stVerticalBlock"] {{
 }}
 
 .sort-caption {{
-    font-family: var(--font-text); font-size: 13px; color: #666;
-    margin-top: 5px; margin-bottom: 15px; font-weight: 400;
+    font-family: var(--font-text); 
+    font-size: 13px; 
+    color: #666;
+    margin-top: 5px; 
+    margin-bottom: 15px; 
+    font-weight: 400;
+    text-align: center;
 }}
 
 .contacts-info-card {{
@@ -456,25 +532,31 @@ div.stButton, [data-testid="stColumn"], [data-testid="stVerticalBlock"] {{
 .back-btn-container div.stButton > button:hover {{ border-color: rgb(41,128,185) !important; color: rgb(41,128,185) !important; }}
 .back-btn-container div.stButton > button:hover p,
 .back-btn-container div.stButton > button:hover span {{ color: rgb(41,128,185) !important; }}
-
 .back-btn-container div.stButton > button:active {{ border-color: rgb(41,128,185) !important; color: rgb(41,128,185) !important; background-color: #f8fafc !important; transform: translateY(1px) !important; }}
 .back-btn-container div.stButton > button:active p,
 .back-btn-container div.stButton > button:active span {{ color: rgb(41,128,185) !important; }}
 
-/* Карта */
 @keyframes mapEntrance {{
     from {{ opacity: 0; transform: scale(0.95) translateY(10px); }}
     to {{ opacity: 1; transform: scale(1) translateY(0); }}
 }}
-.svg-wrapper {{ width: 100%; display: flex; justify-content: center; align-items: center; margin-top: 10px; margin-bottom: 70px; overflow: visible; }}
-.svg-wrapper svg {{ width: 60%; max-width: 1200px; height: auto !important; max-height: 10%; display: block; overflow: visible !important; }}
+.svg-wrapper {{ width: 100%; display: flex; justify-content: center; align-items: center; margin-top: 10px; margin-bottom: 15px; overflow: visible; }}
+.svg-wrapper svg {{ width: 100%; max-width: 100%; height: auto !important; max-height: none; display: block; overflow: visible !important; }}
 .svg-wrapper a {{ text-decoration: none; display: block; outline: none; transform-origin: center !important; transition: transform 0.25s ease, filter 0.25s ease !important; }}
 .svg-wrapper path {{ fill: #e0e0e0; stroke: #ffffff; stroke-width: 1; transition: fill 0.25s ease, stroke 0.25s ease !important; cursor: pointer; }}
 .map-label {{ font-family: var(--font-ui); font-size: 9px; font-weight: 600; fill: #111111; text-anchor: middle; pointer-events: none; user-select: none; paint-order: stroke; stroke: white; stroke-width: 1.5px; stroke-linejoin: round; }}
 .svg-wrapper a:hover {{ transform: scale(1.015) translateY(-2px) !important; filter: drop-shadow(0px 6px 10px rgba(0, 0, 0, 0.3)) !important; position: relative; z-index: 9999 !important; }}
 .svg-wrapper a:hover path {{ fill: #3498db !important; stroke: #1f5f8b !important; }}
 
-/* 3. Табличные данные (Golos Text) */
+.indicators-container {{ padding: 10px 5px; }}
+.indicator-section-title {{ text-align: center; font-family: var(--font-ui); font-size: 18px; font-weight: 600; color: #1a252c; margin: 0px 0 12px 0; }}
+.indicator-section-subtitle-italic {{ text-align: center; font-family: var(--font-text); font-size: 14px; font-style: italic; color: #626d7a; margin: -8px 0 12px 0; }}
+.indicator-row {{ display: flex; gap: 10px; margin-bottom: 35px; }}
+.indicator-card {{ flex: 1; background: #f8f9fa; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 8px; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 75px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }}
+.card-line1 {{ font-family: var(--font-ui); font-size: 18px; font-weight: 600; color: #2980b9; line-height: 1.3; }}
+.card-line2 {{ font-family: var(--font-text); font-size: 18px; font-weight: 600; color: #64748b; margin-top: 4px; margin-bottom: 4px; line-height: 1.3; }}
+.card-line3 {{ font-family: var(--font-text); font-size: 14px; color: #64748b; line-height: 1.3; }}
+
 table {{ width: 100% !important; border-collapse: collapse !important; font-size: 14px !important; margin-top: 15px !important; }}
 table thead tr th {{
     font-family: var(--font-text); font-weight: 600 !important; font-size: 14px !important;
@@ -499,6 +581,66 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
 .pulse-highlight {{ animation: rowPulse 0.6s ease-out forwards; }}
 .sort-arrow {{ display: inline-block; margin-left: 8px; font-size: 15px; vertical-align: middle; }}
 
+.district-section-title {{
+    font-family: var(--font-ui); font-size: 17px; font-weight: 600; 
+    color: #1a252c; margin-top: 1px; margin-bottom: 12px;
+    text-align: center;
+}}
+.district-section-caption {{
+    font-family: var(--font-text); font-size: 13px; color: #666; margin-bottom: 8px;
+}}
+.buttons-container {{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 35px;
+    margin-bottom: 5px;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 15px;
+}}
+.btn-group-left {{
+    display: flex;
+    gap: 15px;
+}}
+.btn-group-right {{
+    margin-left: auto;
+}}
+
+/* Стили для новой таблицы весов */
+
+.weights-table {{
+    margin-top: 5px !important;
+/*    border: 1px solid #e2e8f0 !important;*/
+}}
+.weights-table thead tr th {{
+    background-color: #f8fafc !important;
+}}
+.weights-table tbody tr td {{
+/*    border: 1px solid #edf2f7 !important;*/
+    padding: 10px !important;
+/*    text-align: center !important;    */
+}}
+/* Выделение группирующих заголовков */
+.weights-table thead tr:first-child th {{
+    background-color: #f1f5f9 !important;
+/*    font-weight: 600 !important;*/
+/*    color: #334155 !important;*/
+    padding: 12px !important;
+}}
+#weights tbody tr td:first-child {{
+    text-align: center !important;
+}}
+
+/* Удаляем выделение заголовков */
+th {{
+    -webkit-user-select: none; /* Для Safari */
+    -moz-user-select: none;    /* Для Firefox */
+    -ms-user-select: none;     /* Для IE/Edge */
+    user-select: none;         /* Стандартный вариант */
+    cursor: pointer;           /* Указывает пользователю, что элемент кликабелен */
+}}
+
 .footer {{
     width: calc(100% + 10rem) !important; margin-left: -5rem !important; margin-right: -5rem !important;
     position: relative; 
@@ -522,12 +664,11 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
 """, unsafe_allow_html=True)
 
 # =============================================================================
-# 6. JS СКРИПТ ДЛЯ ГЛАВНОГО ЭКРАНА
+# 6. JS СКРИПТ ДЛЯ СОРТИРОВКИ ТАБЛИЦ
 # =============================================================================
 sorting_script = """
 <script>
 const parentDoc = window.parent.document;
-
 try {
     if (parentDoc) {
         parentDoc.documentElement.lang = 'ru';
@@ -538,22 +679,29 @@ try {
     }
 } catch (e) {}
 
+function lockSelectInput() {
+    const inputs = parentDoc.querySelectorAll('.date-picker-wrapper input');
+    inputs.forEach(input => {
+        if (!input.readOnly) {
+            input.readOnly = true;
+        }
+        input.style.caretColor = 'transparent';
+        input.style.cursor = 'pointer';
+    });
+}
+
 function makeSortable(tableId) {
     const table = parentDoc.getElementById(tableId);
     if (!table || !table.tBodies || !table.tBodies[0]) return;
-
     const tbody = table.tBodies[0];
     const headers = Array.from(table.tHead.rows[0].cells);
     headers.forEach((header, index) => {
         if (header.dataset.sortInitialized === "true") return;
         header.dataset.sortInitialized = "true";
-
         let asc = true;
         header.style.cursor = "pointer";
-
         header.onclick = () => {
             const rows = Array.from(tbody.rows);
-
             rows.sort((a, b) => {
                 if (!a.cells[index] || !b.cells[index]) return 0;
                 let v1 = a.cells[index].innerText.trim();
@@ -563,60 +711,104 @@ function makeSortable(tableId) {
                 if (!isNaN(n1) && !isNaN(n2)) return asc ? n1 - n2 : n2 - n1;
                 return asc ? v1.localeCompare(v2, 'ru') : v2.localeCompare(v1, 'ru');
             });
-
             rows.forEach(row => tbody.appendChild(row));
-
             headers.forEach(h => {
                 const existingArrow = h.querySelector(".sort-arrow");
                 if (existingArrow) existingArrow.remove();
                 h.style.setProperty('background-color', '#f8f9fa', 'important');
             });
-
-            if (asc) {
-                header.style.setProperty('background-color', '#e8f8f5', 'important');
-            } else {
-                header.style.setProperty('background-color', '#fdedec', 'important');
-            }
-
+            if (asc) { header.style.setProperty('background-color', '#e8f8f5', 'important'); }
+            else { header.style.setProperty('background-color', '#fdedec', 'important'); }
             const arrowSpan = parentDoc.createElement("span");
             arrowSpan.className = "sort-arrow";
             arrowSpan.innerHTML = asc ? "&#9650;" : "&#9660;"; 
             arrowSpan.style.color = asc ? "#27ae60" : "#e74c3c";
             header.appendChild(arrowSpan);
-
             rows.forEach(row => {
                 row.classList.remove("pulse-highlight");
                 void row.offsetWidth;
                 row.classList.add("pulse-highlight");
                 setTimeout(() => { row.classList.remove("pulse-highlight"); }, 600);
             });
-
             asc = !asc;
         };
     });
 }
-
 setInterval(() => {
     makeSortable("mainTable");
+    makeSortable("npTable");
+    lockSelectInput();
 }, 500);
 </script>
 """
 
 # =============================================================================
-# СЦЕНАРИЙ №1: ЭКРАН ГЛАВНОЙ СТРАНИЦЫ С КАРТОЙ И ОБЩЕЙ ТАБЛИЦЕЙ
+# ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ФОРМИРОВАНИЯ HTML ПРАВОЙ ЧАСТИ
+# =============================================================================
+def build_indicators_html(df_ind):
+    if df_ind is None:
+        return '<div style="padding:20px;text-align:center;color:#999;">Файл основных показателей не найден</div>'
+    def cell(row, col):
+        try:
+            val = df_ind.iloc[row, col]
+            if pd.isna(val): return ""
+            if isinstance(val, float):
+                if val == int(val): return str(int(val))
+                return str(val)
+            return str(val)
+        except Exception: return ""
+    html = '<div class="indicators-container">'
+    html += '<div class="indicator-section-title">Основные показатели финансовой доступности</div>'
+    html += '<div class="indicator-row">'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,0)}</div><div class="card-line2">{cell(1,0)}</div><div class="card-line3">{cell(2,0)}</div></div>'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,1)}</div><div class="card-line2">{cell(1,1)}</div><div class="card-line3">{cell(2,1)}</div></div>'
+    html += '</div>'
+    html += '<div class="indicator-section-title">Платежная инфраструктура</div>'
+    html += '<div class="indicator-row">'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,2)}</div><div class="card-line2">{cell(1,2)}</div><div class="card-line3">{cell(2,2)}</div></div>'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,3)}</div><div class="card-line2">{cell(1,3)}</div><div class="card-line3">{cell(2,3)}</div></div>'
+    html += '</div><div class="indicator-row">'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,4)}</div><div class="card-line2">{cell(1,4)}</div><div class="card-line3">{cell(2,4)}</div></div>'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,5)}</div><div class="card-line2">{cell(1,5)}</div><div class="card-line3">{cell(2,5)}</div></div>'
+    html += '</div>'
+    html += '<div class="indicator-section-title">Альтернативная инфраструктура</div>'
+    html += '<div class="indicator-section-subtitle-italic">(создана при непосредственном участии Сибирского ГУ Банка России)</div>'
+    html += '<div class="indicator-row">'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,6)}</div><div class="card-line2">{cell(1,6)}</div><div class="card-line3">{cell(2,6)}</div></div>'
+    html += f'<div class="indicator-card"><div class="card-line1">{cell(0,7)}</div><div class="card-line2">{cell(1,7)}</div><div class="card-line3">{cell(2,7)}</div></div>'
+    html += '</div></div>'
+    return html
+
+# =============================================================================
+# СЦЕНАРИЙ №1: ГЛАВНАЯ СТРАНИЦА
 # =============================================================================
 if st.session_state.page == 'home':
-
     st.markdown("""
     <div class="header-container">
         <div class="main-title">
             <h1><span class="icon">🏦</span> Информационный портал финансовой доступности</h1>
         </div>
         <div class="sub-title">
-            <h2>Мониторинг муниципальных образований Новосибирской области</h2>
+            <h4>Новосибирская область</h4>
+            <p>30 муниципальных образований, 876 населенных пунктов (без учета городов и с численностью населения от 100 человек)</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+    _, center_col, _ = st.columns([5.8, 1, 6])
+    with center_col:
+        st.markdown('<div class="date-picker-wrapper">', unsafe_allow_html=True)
+        dates_list = ["01.07.2025", "01.01.2026"]
+        st.selectbox(
+            "Отчетная дата",
+            dates_list,
+            label_visibility="collapsed",
+            key="selected_date",
+            index=dates_list.index(current_date) if current_date in dates_list else 0,
+            on_change=set_date_param
+        )
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if 'map_animated' not in st.session_state:
         svg_class = "first-load"
@@ -625,36 +817,58 @@ if st.session_state.page == 'home':
         svg_class = ""
 
     animated_svg = svg_content.replace('<svg ', f'<svg class="{svg_class}" ')
+    indicators_html = build_indicators_html(df_indicators)
 
-    st.markdown(f'<div class="svg-wrapper">{animated_svg}</div>', unsafe_allow_html=True)
+    left_col, spacer, right_col = st.columns([3, 0.2, 1.8])
+    with left_col:
+        st.markdown(f'<div class="svg-wrapper">{animated_svg}</div>', unsafe_allow_html=True)
+    with spacer:
+        st.empty()
+    with right_col:
+        st.markdown(indicators_html, unsafe_allow_html=True)
+        
     st.markdown("---")
-    st.subheader("Список муниципальных образований")
-    st.markdown('<div class="sort-caption">(работает сортировка по нажатию на заголовки)</div>', unsafe_allow_html=True)
+    st.markdown("""
+        <div style="text-align: center;">
+            <h2 style="margin-bottom: 0;">Список муниципальных образований</h2>
+            <div class="sort-caption" style="margin-top: -15px;">(работает сортировка по нажатию на заголовки)</div>
+        </div>
+    """, unsafe_allow_html=True)    
 
     if not display_df.empty:
         display_df_for_table = display_df.copy()
         display_df_for_table["Район"] = display_df_for_table.apply(
-            lambda row: f'<a href="?region={row["ID"]}" target="_self">{row["Район"]}</a>',
+            lambda row: f'<a href="?region={row["ID"]}&date={current_date}" target="_self">{row["Район"]}</a>',
             axis=1
         )
 
-        html_table = display_df_for_table.drop(columns=["ID"]).to_html(
-            escape=False, index=False, table_id="mainTable"
-        )
-        st.markdown(html_table, unsafe_allow_html=True)
+        headers_html = "".join(f"<th>{c}</th>" for c in display_df_for_table.drop(columns=["ID"]).columns)
+        rows_html = ""
+        for _, row in display_df_for_table.iterrows():
+            cells = ""
+            for col in display_df_for_table.drop(columns=["ID"]).columns:
+                val = row[col]
+                if str(col).startswith(("Уровень", "Изменение уровня")) and pd.notna(val):
+                    try:
+                        num_val = float(str(val).replace('%', '').replace(',', '.').strip())
+                        if num_val <= 1.0: num_val *= 100
+                        cells += f'<td>{num_val:.1f}%</td>'
+                    except:
+                        cells += f'<td>{val}</td>'
+                else:
+                    cells += f'<td>{val if pd.notna(val) else ""}</td>'
+            rows_html += f"<tr>{cells}</tr>"
+        
+        st.markdown(f'<table id="mainTable"><thead><tr>{headers_html}</tr></thead><tbody>{rows_html}</tbody></table>', unsafe_allow_html=True)
 
-    components.html(sorting_script, height=0)
     st.markdown("<div style='margin-top: 45px;'></div>", unsafe_allow_html=True)
-
     b64 = convert_df_to_excel_b64(display_df, sheet_name='Районы НСО') if not display_df.empty else ""
 
     col1, col2 = st.columns([1, 1])
-
     with col1:
         if st.button("📞 Контакты и обратная связь", key="contacts_btn"):
             st.session_state.show_contacts_block = not st.session_state.get('show_contacts_block', False)
             st.rerun()
-
     with col2:
         st.markdown(
             f"""
@@ -680,11 +894,9 @@ if st.session_state.page == 'home':
         )
 
 # =============================================================================
-# СЦЕНАРИЙ №2: ЭКРАН КАРТОЧКИ КОНКРЕТНОГО ВЫБРАННОГО РАЙОНА
+# СЦЕНАРИЙ №2: СТРАНИЦА РАЙОНА
 # =============================================================================
 elif st.session_state.page == 'district':
-    st.markdown("""<style>.footer { margin-top: 30px !important; }</style>""", unsafe_allow_html=True)
-    
     region_id = st.session_state.selected_region
 
     st.markdown('<div class="back-btn-container">', unsafe_allow_html=True)
@@ -699,641 +911,179 @@ elif st.session_state.page == 'district':
         if not region_row.empty:
             region_name = region_row['Район'].values[0]
 
-            kfd_base_val = 0.0
-            if "КФД, в баллах" in region_row.columns:
-                try:
-                    kfd_base_val = float(str(region_row["КФД, в баллах"].values[0]).replace(",", "."))
-                except Exception:
-                    kfd_base_val = 0.0
-
             st.markdown(f'<h2 style="font-family: var(--font-ui); text-align: center; font-size: 28px !important; font-weight: 700; color: #1a252c; margin-top: 20px; margin-bottom: 5px; letter-spacing: -0.01em;">{region_name}</h2>', unsafe_allow_html=True)
-            st.markdown(f'<h3 style="font-family: var(--font-ui); text-align: center; font-size: 16px !important; font-weight: 600; color: #626d7a; margin-top: 0px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em;">на 01.07.2025</h3>', unsafe_allow_html=True)
 
-            st.markdown("---")
-
-            NP_COLS = [
-                "Населенный пункт",
-                "Численность населения, чел.",
-                "Офисы банков",
-                "Банкоматы КО",
-                "Устройства с выдачей наличных",
-                "Действующие ТФД",
-                "Действующие ФП",
-                "КФД, в баллах",
-            ]
+            cols_to_show = [col for col in region_row.columns if col != 'ID']
+            np_display_cols = []
+            for col in cols_to_show:
+                if col == "Район":
+                    np_display_cols.append("Населенный пункт")
+                else:
+                    np_display_cols.append(col)
 
             df_np_region = pd.DataFrame()
             if df_np_all is None:
                 st.error(f"❌ Файл {NP_FILE} не найден.")
             else:
                 mask = df_np_all["Район"].astype(str).str.strip() == str(region_name).strip()
-                available_cols = [c for c in NP_COLS if c in df_np_all.columns]
+                available_cols = [c for c in np_display_cols if c in df_np_all.columns]
                 df_np_region = df_np_all[mask][available_cols].copy()
                 if "Населенный пункт" in df_np_region.columns:
                     df_np_region = df_np_region.sort_values("Населенный пункт").reset_index(drop=True)
 
             b64_np_excel = convert_df_to_excel_b64(df_np_region, sheet_name='Населенные пункты') if not df_np_region.empty else ""
 
-            cols_to_show = [col for col in region_row.columns if col != 'ID']
-            district_row_data = region_row[cols_to_show].copy()
+            st.markdown(f'<div class="district-section-title">Количество населенных пунктов: {len(df_np_region)}</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-family: var(--font-ui); font-size: 16px; font-weight: 600; color: #1a252c; margin-top: 10px; margin-bottom: 8px; text-align: center;">(без городов и с численностью населения от 100 чел.)</div>', unsafe_allow_html=True)            
+            st.markdown(f'<h5 style="font-family: var(--font-ui); text-align: center; font-size: 16px !important; font-weight: 600; color: #1a252c; margin-top: 10px; margin-bottom: 10px; letter-spacing: 0.05em;">на {current_date}</h5>', unsafe_allow_html=True)
 
-            dist_headers = list(cols_to_show) + ["Открыть ТФД", "Назначить ФП", "Прогноз бонусного балла", "Прогноз КФД, в баллах"]
+            st.markdown("---")
+
+            district_row_data = region_row[cols_to_show].copy()
+            dist_headers = list(cols_to_show)
             dist_header_html = "".join(f"<th>{c}</th>" for c in dist_headers)
 
+            # --- ФОРМИРОВАНИЕ СТРОКИ НСО ---
+            nso_row_html = ""
+            if df_nso_summary is not None and not df_nso_summary.empty:
+                nso_row = df_nso_summary.iloc[0] # Берем первую (единственную) строку
+                nso_cells = ""
+                for col in cols_to_show:
+                    if col == "Район":
+                        # Подменяем название на "Новосибирская область"
+                        nso_cells += f'<td style="font-weight: 700 !important;">Новосибирская область</td>'
+                        continue
+                    
+                    val = nso_row.get(col, "")
+                    if str(col).startswith(("Уровень", "Изменение уровня")) and pd.notna(val):
+                        try:
+                            num_val = float(str(val).replace('%', '').replace(',', '.').strip())
+                            if num_val <= 1.0: num_val *= 100
+                            nso_cells += f'<td>{num_val:.1f}%</td>'
+                        except:
+                            nso_cells += f'<td>{val}</td>'
+                    else:
+                        nso_cells += f'<td>{val if pd.notna(val) else ""}</td>'
+                
+                # Добавляем стиль для визуального отделения строки области (светло-синий фон)
+                nso_row_html = f'<tr style="background-color: #e8f4f8">{nso_cells}</tr>'
+
+            # --- ФОРМИРОВАНИЕ СТРОКИ РАЙОНА ---
             dist_cells = ""
             for col in cols_to_show:
                 val = district_row_data[col].values[0]
-                dist_cells += f'<td>{val if pd.notna(val) else ""}</td>'
+                if str(col).startswith(("Уровень", "Изменение уровня")) and pd.notna(val):
+                    try:
+                        num_val = float(str(val).replace('%', '').replace(',', '.').strip())
+                        if num_val <= 1.0: num_val *= 100
+                        dist_cells += f'<td>{num_val:.1f}%</td>'
+                    except:
+                        dist_cells += f'<td>{val}</td>'
+                else:
+                    dist_cells += f'<td>{val if pd.notna(val) else ""}</td>'
+
+            # --- СБОРКА ИТОГОВОЙ ТАБЛИЦЫ ---
+            district_table_html = f"""
+            <table>
+                <thead><tr>{dist_header_html}</tr></thead>
+                <tbody>
+                    {nso_row_html}
+                    <tr>{dist_cells}</tr>
+                </tbody>
+            </table>
+            """
+            st.markdown(district_table_html, unsafe_allow_html=True)
             
-            dist_cells += '<td id="dist-sum-tfd" style="font-weight:600 !important;color:#27ae60;">0</td>'
-            dist_cells += '<td id="dist-sum-fp" style="font-weight:600 !important;color:#27ae60;">0</td>'
-            dist_cells += f'<td id="dist-bonus-pred" style="font-weight:600 !important;color:#27ae60;">0.0</td>'
-            dist_cells += f'<td id="dist-kfd-pred" style="font-weight:600 !important;color:#27ae60;">{kfd_base_val:.1f}</td>'
-
-            np_headers_html = "".join(f"<th>{c}</th>" for c in NP_COLS + ["Открыть ТФД", "Назначить ФП"])
-
-            tooltip_layout_html = """
-            <span class="tooltip-container">
-                <span class="tooltip-trigger-icon">ⓘ</span>
-                <span class="tooltip-box-card">
-                <div class="tt-header-title"><span style="color: #2980b9; font-weight: bold; font-size: 20px; margin-right: 5px;">&#8505;</span> Методика расчета показателя «Бонусный балл» (для населенного пункта)</div>                    
-                    <div class="tt-description-text">Показатель рассчитывается для каждого населенного пункта индивидуально на основе его текущего уровня КФД и планируемой активности.</div>
-                    <div class="tt-formula-block">
-                        Бонусный балл НП = Кнужд × (W_тфд × Открыть ТФД + W_фп × Назначить ФП)
-                    </div>
-                    <ul class="tt-unordered-list">
-                        <li><strong>Кнужд</strong> (Коэффициент нужды) = (100 - КФД населенного пункта) / 100</li>
-                        <li><strong>Весовые коэффициенты (W_тфд и W_фп)</strong> определяются диапазоном текущего значения КФД:</li>
-                    </ul>
-                    <table class="tt-embedded-table">
+            # --- ДОБАВЛЕНИЕ ТАБЛИЦЫ "УДЕЛЬНЫЕ ВЕСА" ---
+            st.markdown("""
+            <div style="display: flex; flex-direction: column; align-items: center; margin-top: 40px; margin-bottom: 40px;">
+                <div style="font-family: var(--font-ui); font-size: 18px; font-weight: 600; margin-bottom: 15px; color: #1a252c;">
+                    Вклад элементов созданной альтернативной инфраструктуры в показатель финансовой доступности
+                </div>
+                <div style="max-width: 900px; width: 100%;">
+                    <table id="weights" class="weights-table" style="width: 100% !important;">
                         <thead>
+                        <!-- Добавляем новую группирующую строку -->
+                        <tr style="background-color: #f1f5f9;">
+                            <th colspan="2">Классификация уровня финансовой доступности</th>
+                            <th colspan="2">Вклад элементов альтернативной инфраструктуры</th>
+                        </tr>
                             <tr>
-                                <th>Текущий КФД НП (в баллах)</th>
-                                <th>Вес «Открыть ТФД» (W_тфд)</th>
-                                <th>Вес «Назначить ФП» (W_фп)</th>
+                                <th>Уровень</th>
+                                <th>Значение, %</th>
+                                <th>Точка финансового доступа</th>
+                                <th>Финансовый помощник</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr><td>от 0 до 45</td><td>5</td><td>4</td></tr>
-                            <tr><td>от 46 до 70</td><td>4</td><td>3</td></tr>
-                            <tr><td>от 71 до 85</td><td>3</td><td>2</td></tr>
-                            <tr><td>от 86 до 100</td><td>2</td><td>1</td></tr>
+                            <tr style="color: #27ae60; font-weight: 600;"><td>Хороший</td><td>86 – 100</td><td>0,5%</td><td>2%</td></tr>
+                            <tr style="color: #2980b9; font-weight: 600;"><td>Выше среднего</td><td>66 – 85</td><td>1%</td><td>3%</td></tr>
+                            <tr style="color: #d35400; font-weight: 600;"><td>Средний</td><td>46 – 65</td><td>2.5%</td><td>4%</td></tr>
+                            <tr style="color: #c0392b; font-weight: 600;"><td>Ниже среднего</td><td>31 – 45</td><td>3%</td><td>5%</td></tr>
+                            <tr style="color: #e74c3c; font-weight: 600;"><td>Недостаточный</td><td>0 – 30</td><td>4%</td><td>6%</td></tr>
                         </tbody>
                     </table>
-                </span>
-            </span>
-            """
-            np_headers_html += f"<th>Бонусный балл {tooltip_layout_html}</th>"
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            # --- "УДЕЛЬНЫЕ ВЕСА" ---
 
-            np_rows_html = ""
-            for i, row in df_np_region.iterrows():
-                cells = ""
-                kfd_val_np = 0.0
-                for col in NP_COLS:
-                    val = row[col]
-                    cells += f'<td>{val if pd.notna(val) else ""}</td>'
-                    if col == "КФД, в баллах":
-                        try:
-                            kfd_val_np = float(str(val).replace(',', '.'))
-                        except:
-                            kfd_val_np = 0.0
-                
-                cells += (
-                    f'<td style="text-align:center; vertical-align:middle;">'
-                    f'<div style="display:inline-flex; align-items:stretch; height:28px;">'
-                    f'<input type="text" inputmode="numeric" class="np-open-tfd" '
-                    f'style="width:55px; text-align:center; border:1px solid #ccc; border-radius:4px 0 0 4px; '
-                    f'padding:0 4px; font-size:14px; color: #27ae60 !important; font-weight:700; outline:none; border-right:none;" oninput="formatTfdInput(event)" value="">'
-                    f'<div style="display:flex; flex-direction:column;">'
-                    f'<button onclick="stepTfd(event, 1)" style="flex:1; width:15px; font-size:8px; line-height:1; padding:0; border:1px solid #ccc; border-bottom:0.5px solid #ccc; border-radius:0 4px 0 0; background:#f8f9fa; cursor:pointer; color:#555; margin:0;">▲</button>'
-                    f'<button onclick="stepTfd(event, -1)" style="flex:1; width:15px; font-size:8px; line-height:1; padding:0; border:1px solid #ccc; border-top:0.5px solid #ccc; border-radius:0 0 4px 0; background:#f8f9fa; cursor:pointer; color:#555; margin:0;">▼</button>'
-                    f'</div></div></td>'
-                )
-                
-                cells += (
-                    f'<td style="text-align:center; vertical-align:middle;">'
-                    f'<div style="display:inline-flex; align-items:stretch; height:28px;">'
-                    f'<input type="text" inputmode="decimal" class="np-assign-fp" '
-                    f'style="width:55px; text-align:center; border:1px solid #ccc; border-radius:4px 0 0 4px; '
-                    f'padding:0 4px; font-size:14px; color: #27ae60 !important; font-weight:700; outline:none; border-right:none;" oninput="formatFpInput(event)" value="">'
-                    f'<div style="display:flex; flex-direction:column;">'
-                    f'<button onclick="stepFp(event, 0.1)" style="flex:1; width:15px; font-size:8px; line-height:1; padding:0; border:1px solid #ccc; border-bottom:0.5px solid #ccc; border-radius:0 4px 0 0; background:#f8f9fa; cursor:pointer; color:#555; margin:0;">▲</button>'
-                    f'<button onclick="stepFp(event, -0.1)" style="flex:1; width:15px; font-size:8px; line-height:1; padding:0; border:1px solid #ccc; border-top:0.5px solid #ccc; border-radius:0 0 4px 0; background:#f8f9fa; cursor:pointer; color:#555; margin:0;">▼</button>'
-                    f'</div></div></td>'
-                )
-                
-                cells += f'<td class="np-bonus-val">0</td>'
-                np_rows_html += f'<tr data-kfd="{kfd_val_np}">{cells}</tr>\n'
+            st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+            st.markdown('<div class="district-section-title">Населенные пункты</div>', unsafe_allow_html=True)
+            st.markdown('<div class="sort-caption">(работает сортировка по нажатию на заголовки)</div>', unsafe_allow_html=True)
 
-            n_np = len(df_np_region)
-
-            table_css = f"""
-<style>
-{font_faces_css}
-
-:root {{
-    --font-ui: 'Golos UI', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-    --font-text: 'Golos Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-}}
-
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{ background: transparent; padding: 0; overflow-x: auto; font-family: var(--font-text); font-variant-numeric: lining-nums tabular-nums; }}
-
-table {{ width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 10px; font-family: var(--font-text); overflow: visible !important; }}
-table thead tr th {{
-    font-family: var(--font-text); font-weight: 600; font-size: 14px;
-    background-color: #f8f9fa; color: #000000; text-align: center;
-    border: 1px solid #dcdcdc; padding: 8px 6px; vertical-align: middle;
-    white-space: normal; user-select: none;
-    font-variant-numeric: lining-nums tabular-nums;
-    position: relative;
-}}
-table tbody tr td {{
-    font-family: var(--font-text); font-weight: 400; font-size: 14px;
-    text-align: center; color: #222; border: 1px solid #dcdcdc;
-    padding: 5px 6px; vertical-align: middle;
-    font-variant-numeric: lining-nums tabular-nums;
-}}
-table tbody tr td:first-child {{ text-align: left; padding-left: 12px; }}
-table tbody tr:hover {{ background-color: #f1f7fc; }}
-
-td.np-bonus-val {{
-    font-family: var(--font-ui) !important;
-    font-weight: 700 !important;
-    color: #27ae60 !important;
-    font-size: 14px !important;
-}}
-
-h3 {{
-    font-family: var(--font-ui); font-size: 17px; font-weight: 600; 
-    color: #1a252c; margin-top: 40px; margin-bottom: 4px;
-}}
-.caption {{ font-family: var(--font-text); font-size: 13px; color: #666; margin-bottom: 8px; }}
-
-input, button {{
-    font-family: var(--font-ui) !important;
-    font-variant-numeric: lining-nums tabular-nums;
-}}
-
-.buttons-container {{
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 35px;
-    margin-bottom: 5px;
-    width: 100%;
-    flex-wrap: wrap;
-    gap: 15px;
-}}
-.btn-group-left {{
-    display: flex;
-    gap: 15px;
-}}
-.btn-group-right {{
-    margin-left: auto;
-}}
-.portal-btn {{
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: 300px !important; min-width: 300px !important; max-width: 300px !important;
-    height: 90px !important; min-height: 90px !important; max-height: 90px !important;
-    background-color: rgb(255, 255, 255) !important;
-    border: 1px solid rgba(49, 51, 63, 0.2) !important;
-    border-radius: 12px !important;
-    box-shadow: rgba(0, 0, 0, 0.05) 0px 1px 2px 0px !important;
-    margin: 0 !important; padding: 0 !important;
-    box-sizing: border-box !important;
-    transition: border-color 0.2s, color 0.2s, background-color 0.2s, transform 0.1s !important;
-    user-select: none !important; cursor: pointer !important;
-    text-decoration: none !important;
-    font-family: var(--font-ui) !important;
-    font-size: 16px !important;
-    font-weight: 550 !important;
-    font-style: normal !important;
-    line-height: 1.2 !important;
-    color: rgb(49, 51, 63) !important;
-}}
-.portal-btn:hover {{
-    background-color: rgb(255, 255, 255) !important;
-    border-color: #2980b9 !important;
-    color: #2980b9 !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 6px -1px rgba(41, 128, 185, 0.1), 0 2px 4px -1px rgba(41, 128, 185, 0.06) !important;
-}}
-.portal-btn:active {{
-    transform: translateY(1px) !important;
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
-    background-color: #f8fafc !important;
-    color: #2980b9 !important;
-    border-color: #2980b9 !important;
-}}
-
-.tooltip-container {{
-    position: relative;
-    display: inline-block;
-    margin-left: 5px;
-    cursor: help;
-    vertical-align: middle;
-}}
-
-.tooltip-trigger-icon {{
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #e2e8f0;
-    color: #475569;
-    border-radius: 50%;
-    width: 25px;
-    height: 24px;
-    font-size: 16px;
-    font-weight: bold;
-    transition: background-color 0.2s, color 0.2s;
-}}
-
-.tooltip-container:hover .tooltip-trigger-icon {{
-    background-color: #2980b9;
-    color: #ffffff;
-}}
-
-.tooltip-box-card {{
-    display: none;
-    position: absolute;
-    top: 25px;
-    right: 0;
-    width: 600px;
-    background-color: #ffffff;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.1);
-    padding: 18px;
-    z-index: 999999 !important;
-    text-align: left;
-    white-space: normal;
-    color: #334155;
-    font-weight: 400 !important;
-}}
-
-.tooltip-container:hover .tooltip-box-card {{
-    display: block;
-}}
-
-.tt-header-title {{
-    font-family: var(--font-ui);
-    font-weight: 600;
-    font-size: 14px;
-    color: #1e293b;
-    margin-bottom: 8px;
-}}
-
-.tt-description-text {{
-    font-size: 13px;
-    color: #64748b;
-    line-height: 1.45;
-    margin-bottom: 12px;
-}}
-
-.tt-formula-block {{
-    background-color: #f0fdf4;
-    border-left: 4px solid #22c55e;
-    padding: 10px 12px;
-    font-family: var(--font-ui);
-    font-weight: 600;
-    font-size: 13.5px;
-    color: #166534;
-    margin-bottom: 12px;
-    border-radius: 0 6px 6px 0;
-}}
-
-.tt-unordered-list {{
-    list-style-type: disc;
-    padding-left: 20px;
-    font-size: 12.5px;
-    color: #334155;
-    margin-bottom: 12px;
-    line-height: 1.5;
-}}
-
-.tt-unordered-list li {{
-    margin-bottom: 5px;
-}}
-
-.tt-embedded-table {{
-    width: 100% !important;
-    border-collapse: collapse !important;
-    margin-top: 8px !important;
-    font-size: 12px !important;
-}}
-
-.tt-embedded-table th {{
-    background-color: #f8fafc !important;
-    color: #475569 !important;
-    font-weight: 600 !important;
-    border: 1px solid #e2e8f0 !important;
-    padding: 6px 8px !important;
-    font-size: 11.5px !important;
-    cursor: default !important;
-    position: static !important;
-}}
-
-.tt-embedded-table td {{
-    border: 1px solid #e2e8f0 !important;
-    padding: 6px 8px !important;
-    text-align: center !important;
-    color: #334155 !important;
-    font-weight: 400 !important;
-    font-size: 12px !important;
-}}
-
-.tt-embedded-table tbody tr:hover {{
-    background-color: #f8fafc !important;
-}}
-</style>
-"""
-
-            np_section_html = ""
             if not df_np_region.empty:
-                np_section_html = f"""
-<h3>Населённые пункты: {n_np}</h3>
-<div class="caption">(работает сортировка по нажатию на заголовки)</div>
-<table id="npTable">
-  <thead><tr>{np_headers_html}</tr></thead>
-  <tbody>{np_rows_html}</tbody>
-</table>
-"""
+                np_headers_html = "".join(f"<th>{c}</th>" for c in available_cols)
+                np_rows_html = ""
+                for _, row in df_np_region.iterrows():
+                    cells = ""
+                    for col in available_cols:
+                        val = row[col]
+                        if pd.notna(val) and str(col).startswith(("Уровень", "Изменение уровня")):
+                            try:
+                                num_val = float(str(val).replace('%', '').replace(',', '.').strip())
+                                if num_val <= 1.0: num_val = num_val * 100
+                                cells += f'<td>{num_val:.1f}%</td>'
+                            except (ValueError, TypeError):
+                                cells += f'<td>{val}</td>'
+                        else:
+                            cells += f'<td>{val if pd.notna(val) else ""}</td>'
+                    np_rows_html += f'<tr>{cells}</tr>\n'
 
-            safe_region_name = short_region_name(region_name)
-            
+                np_table_html = f"""
+                <table id="npTable">
+                    <thead><tr>{np_headers_html}</tr></thead>
+                    <tbody>{np_rows_html}</tbody>
+                </table>
+                """
+                st.markdown(np_table_html, unsafe_allow_html=True)
+            else:
+                if df_np_all is not None:
+                    st.info("По данному району нет данных о населенных пунктах.")
+
             buttons_html = '<div class="buttons-container">'
             buttons_html += '<div class="btn-group-left">'
             if b64_tfd:
-                buttons_html += f'<a class="portal-btn" href="data:application/octet-stream;base64,{b64_tfd}" download="Как открыть ТФД.zip">📄 Как открыть ТФД</a>'
+                buttons_html += f'<a class="portal-btn" href="data:application/zip;base64,{b64_tfd}" download="Как открыть ТФД.zip">📄Как открыть ТФД</a>'
             if b64_fp:
-                buttons_html += f'<a class="portal-btn" href="data:application/octet-stream;base64,{b64_fp}" download="Как назначить ФП.zip">📄 Как назначить ФП</a>'
-            buttons_html += '</div>'
-            
-            if b64_np_excel:
-                buttons_html += f'<div class="btn-group-right"><a class="portal-btn" href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_np_excel}" download="{safe_region_name}_НП.xlsx">📥 Выгрузить в Excel</a></div>'
-            
+                buttons_html += f'<a class="portal-btn" href="data:application/zip;base64,{b64_fp}" download="Как назначить ФП.zip">📄Как назначить ФП</a>'
             buttons_html += '</div>'
 
-            full_html = f"""
-{table_css}
-<table id="districtTable">
-  <thead><tr>{dist_header_html}</tr></thead>
-  <tbody><tr>{dist_cells}</tr></tbody>
-</table>
-{np_section_html}
-{buttons_html}
-<script>
-const kfdBase = {kfd_base_val};
+            if not df_np_region.empty:
+                buttons_html += f'<div class="btn-group-right"><a class="portal-btn" href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_np_excel}" download="NP_{region_name}.xlsx">📥 Выгрузить в Excel</a></div>'
 
-try {{
-    const parentDoc = window.parent.document;
-    if (parentDoc) {{
-        parentDoc.documentElement.lang = 'ru';
-        const mainAppContainer = parentDoc.querySelector('.block-container') || parentDoc.querySelector('section.main');
-        if (mainAppContainer && !mainAppContainer.hasAttribute('role')) {{
-            mainAppContainer.setAttribute('role', 'main');
-        }}
-    }}
-}} catch (e) {{}}
+            buttons_html += '</div>'
+            st.markdown(buttons_html, unsafe_allow_html=True)
 
-function sendHeight() {{
-    const h = document.body.scrollHeight + 20;
-    window.parent.postMessage({{type: "streamlit:setFrameHeight", height: h}}, "*");
-}}
+components.html(sorting_script, height=0)
 
-function makeSortable(tableId) {{
-    const table = document.getElementById(tableId);
-    if (!table || !table.tBodies || !table.tBodies[0]) return;
-    
-    // ГАРАНТИЯ: работаем ТОЛЬКО со строками основного tbody таблицы
-    const tbody = table.tBodies[0];
-    const headers = Array.from(table.tHead.rows[0].cells);
-    headers.forEach((header, index) => {{
-        if (header.dataset.sortInitialized === "true") return;
-        header.dataset.sortInitialized = "true";
-        
-        const headerText = header.innerText.trim();
-        // Блокируем сортировку интерактивных полей только для таблицы населенных пунктов        
-        if (tableId === "npTable" && (headerText.startsWith("Открыть ТФД") || headerText.startsWith("Назначить ФП") || headerText.startsWith("Бонусный балл"))) {{
-            header.style.cursor = "default";
-            return;
-        }}
-        
-        let asc = true;
-        header.style.cursor = "pointer";
-        header.onclick = () => {{
-            const rows = Array.from(tbody.rows);
-            
-            rows.sort((a, b) => {{
-                if (!a.cells[index] || !b.cells[index]) return 0;
-                let v1 = a.cells[index].innerText.trim();
-                let v2 = b.cells[index].innerText.trim();
-                let n1 = parseFloat(v1.replace(",", "."));
-                let n2 = parseFloat(v2.replace(",", "."));
-                if (!isNaN(n1) && !isNaN(n2)) return asc ? n1 - n2 : n2 - n1;
-                return asc ? v1.localeCompare(v2, "ru") : v2.localeCompare(v1, "ru");
-            }});
-            
-            rows.forEach(row => tbody.appendChild(row));
-            
-            headers.forEach(h => {{
-                const arr = h.querySelector(".sort-arrow");
-                if (arr) arr.remove();
-                h.style.backgroundColor = "#f8f9fa";
-            }});
-            
-            header.style.backgroundColor = asc ? "#e8f8f5" : "#fdedec";
-            const arrowSpan = document.createElement("span");
-            arrowSpan.className = "sort-arrow";
-            arrowSpan.innerHTML = asc ? "&#9650;" : "&#9660;";
-            arrowSpan.style.color = asc ? "#27ae60" : "#e74c3c";
-            header.appendChild(arrowSpan);
-            
-            rows.forEach(row => {{
-                row.classList.remove("pulse-highlight");
-                void row.offsetWidth;
-                row.classList.add("pulse-highlight");
-                setTimeout(() => row.classList.remove("pulse-highlight"), 600);
-            }});
-            
-            asc = !asc;
-            sendHeight();
-        }};
-    }});
-}}
-
-function formatTfdInput(e) {{
-    let val = e.target.value;
-    val = val.replace(/[^0-9]/g, '');
-    e.target.value = val;
-    recalcSums();
-}}
-
-function stepTfd(e, delta) {{
-    const container = e.target.parentNode.parentNode; 
-    const input = container.querySelector('input.np-open-tfd');
-    if (!input) return;
-    let v = parseInt(input.value);
-    if (isNaN(v)) v = 0;
-    v += delta;
-    if (v < 0) v = 0;
-    input.value = v;
-    recalcSums();
-}}
-
-function formatFpInput(e) {{
-    let val = e.target.value;
-    val = val.replace(',', '.');
-    val = val.replace(/[^0-9.]/g, '');
-    const parts = val.split('.');
-    if (parts.length > 2) {{
-        val = parts[0] + '.' + parts.slice(1).join('');
-    }}
-    e.target.value = val;
-    recalcSums();
-}}
-
-function stepFp(e, delta) {{
-    const container = e.target.parentNode.parentNode; 
-    const input = container.querySelector('input.np-assign-fp');
-    if (!input) return;
-    let valStr = input.value.replace(',', '.');
-    let v = parseFloat(valStr);
-    if (isNaN(v)) v = 0;
-    v += delta;
-    if (v < 0) v = 0;
-    v = Math.round(v * 100) / 100; 
-    
-    let str = v.toFixed(2);
-    if (str.endsWith(".00")) str = str.slice(0, -3);
-    else if (str.endsWith("0")) str = str.slice(0, -1);
-    
-    input.value = str;
-    recalcSums();
-}}
-
-function recalcSums() {{
-    let sumTfd = 0;
-    let sumFp = 0;
-    let totalPredictedBonus = 0;
-
-    const npTable = document.getElementById("npTable");
-    if (!npTable || !npTable.tBodies || !npTable.tBodies[0]) return;
-    const npRows = Array.from(npTable.tBodies[0].rows);
-
-    npRows.forEach(row => {{
-        const tfdInput = row.querySelector('.np-open-tfd');
-        const fpInput = row.querySelector('.np-assign-fp');
-        const bonusCell = row.querySelector('.np-bonus-val');
-        
-        let tfd = 0;
-        let fp = 0;
-        let kfd = parseFloat(row.getAttribute('data-kfd'));
-        if (isNaN(kfd)) kfd = 0;
-
-        if (tfdInput) {{
-            let v = parseInt(tfdInput.value);
-            if (!isNaN(v) && v > 0) tfd = v;
-        }}
-        if (fpInput) {{
-            let v = parseFloat(fpInput.value.replace(',', '.'));
-            if (!isNaN(v) && v > 0) fp = v;
-        }}
-
-        sumTfd += tfd;
-        sumFp += fp;
-
-        let currentRowBonus = 0;
-
-        if (tfd > 0 || fp > 0) {{
-            let KoeffNeed = (100 - kfd) / 100;
-            let weightTfd = 0;
-            let weightFp = 0;
-
-            if (kfd >= 0 && kfd <= 45) {{
-                weightTfd = 5; weightFp = 4;
-            }} else if (kfd >= 46 && kfd <= 70) {{
-                weightTfd = 4; weightFp = 3;
-            }} else if (kfd >= 71 && kfd <= 85) {{
-                weightTfd = 3; weightFp = 2;
-            }} else if (kfd >= 86 && kfd <= 100) {{
-                weightTfd = 2; weightFp = 1;
-            }}
-
-            currentRowBonus = KoeffNeed * (weightTfd * tfd + weightFp * fp);
-        }}
-        
-        totalPredictedBonus += currentRowBonus;
-
-        if (bonusCell) {{
-            let bonusStr = currentRowBonus.toFixed(1);
-            if (bonusStr.endsWith(".0")) bonusStr = bonusStr.slice(0, -2);
-            bonusCell.innerText = bonusStr;
-        }}
-    }});
-
-    const tfdCell = document.getElementById("dist-sum-tfd");
-    const fpCell  = document.getElementById("dist-sum-fp");
-    if (tfdCell) tfdCell.innerText = sumTfd;
-    
-    if (fpCell) {{
-        let roundedFp = Math.round(sumFp * 100) / 100;
-        let fpStr = roundedFp.toFixed(2);
-        if (fpStr.endsWith(".00")) fpStr = fpStr.slice(0, -3);
-        else if (fpStr.endsWith("0")) fpStr = fpStr.slice(0, -1);
-        fpCell.innerText = fpStr;
-    }}
-
-    const bonusCell = document.getElementById("dist-bonus-pred");
-    const kfdPredCell = document.getElementById("dist-kfd-pred");
-
-    if (bonusCell) {{
-        let bonusStr = totalPredictedBonus.toFixed(1);
-        if (bonusStr.endsWith(".0")) bonusStr = bonusStr.slice(0, -2);
-        bonusCell.innerText = bonusStr;
-    }}
-
-    let predictedKfd = kfdBase + totalPredictedBonus;
-    if (predictedKfd > 100) {{ predictedKfd = 100; }}
-
-    if (kfdPredCell) {{
-        let kfdStr = predictedKfd.toFixed(1);
-        if (kfdStr.endsWith(".0")) kfdStr = kfdStr.slice(0, -2);
-        kfdPredCell.innerText = kfdStr;
-    }}
-}}
-
-setInterval(() => {{
-    makeSortable("districtTable");
-    makeSortable("npTable");
-}}, 400);
-
-recalcSums();
-
-sendHeight();
-setTimeout(sendHeight, 200);
-setTimeout(sendHeight, 600);
-setTimeout(sendHeight, 1200);
-</script>
-"""
-            iframe_h = 130 + max(1, n_np) * 38 + 280
-            components.html(full_html, height=iframe_h, scrolling=False)
-
-# =============================================================================
-# 7. ОТОБРАЖЕНИЕ СТАТИЧЕСКОГО ФУТЕРА СО СЧЕТЧИКОМ
-# =============================================================================
-st.markdown('<div class="content-spacer"></div>', unsafe_allow_html=True)
 st.markdown(
-    f'''
+    f"""
     <div class="footer">
-        🏦 Информационный портал КФД НСО | 
-        Данные актуальны на 01.07.2025 | 
-        Разработано для органов государственной власти Новосибирской области |
-        Посещений портала: <strong>{st.session_state.visit_count}</strong> 
+    🏦 Информационный портал финансовой доступности | 
+    Разработано для органов государственной власти Новосибирской области |
+    Посещений портала: <strong>{st.session_state.visit_count}</strong>
     </div>
-    ''',
+    """,
     unsafe_allow_html=True
 )
