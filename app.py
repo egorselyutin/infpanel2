@@ -671,6 +671,18 @@ th {{
     cursor: pointer;           
 }}
 
+.custom-separator {{
+    height: 2px;
+    width: 100%;
+    background: linear-gradient(
+        to right, 
+        rgba(0, 0, 0, 0) 0%, 
+        rgba(0, 0, 0, 0.5) 50%, 
+        rgba(0, 0, 0, 0) 100%
+    );
+    margin: 20px 0; /* Отступы сверху и снизу */
+}}
+
 .footer {{
     width: calc(100% + 10rem) !important; margin-left: -5rem !important; margin-right: -5rem !important;
     position: relative; 
@@ -887,7 +899,11 @@ if st.session_state.page == 'home':
     with right_col:
         st.markdown(indicators_html, unsafe_allow_html=True)
         
-    st.markdown("---")
+    #st.markdown("---")
+
+    # Добавляем красивый разделитель
+    st.markdown('<div class="custom-separator"></div>', unsafe_allow_html=True)
+
     st.markdown("""
         <div style="text-align: center;">
             <h2 style="margin-bottom: 0;">Список муниципальных образований</h2>
@@ -998,7 +1014,10 @@ elif st.session_state.page == 'district':
             st.markdown('<div style="font-family: var(--font-ui); font-size: 16px; font-weight: 600; color: #1a252c; margin-top: 10px; margin-bottom: 8px; text-align: center;">(без городов и с численностью населения от 100 чел.)</div>', unsafe_allow_html=True)            
             st.markdown(f'<h5 style="font-family: var(--font-ui); text-align: center; font-size: 16px !important; font-weight: 600; color: #1a252c; margin-top: 10px; margin-bottom: 10px; letter-spacing: 0.05em;">на {current_date}</h5>', unsafe_allow_html=True)
 
-            st.markdown("---")
+#            st.markdown("---")
+            # Добавляем красивый разделитель
+            st.markdown('<div class="custom-separator"></div>', unsafe_allow_html=True)
+
 
             district_row_data = region_row[cols_to_show].copy()
             dist_headers = list(cols_to_show)
