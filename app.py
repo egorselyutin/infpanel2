@@ -84,8 +84,6 @@ current_date = query_params.get("date", "01.07.2025")
 if isinstance(current_date, list):
     current_date = current_date[0]
 
-# Синхронизируем стейт виджета с датой из URL (чтобы не было лишних перезагрузок)
-
 if 'visit_counted' not in st.session_state:
     if not has_region_param:
         st.session_state.visit_count = increment_and_get_visits(session_id)
@@ -107,6 +105,29 @@ def short_region_name(name):
     for rep in replacements:
         name = name.replace(rep, "")
     return name.strip()
+
+# --- ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ CSS-КЛАССА ---
+def get_need_level_class(col_name, num_val):
+    """Возвращает CSS-класс для заливки ячейки на основе названия колонки и значения"""
+    if not str(col_name).startswith("Уровень потребности в ДБО"):
+        return ""
+    
+    # Округляем до 2 знаков для защиты от мусора вроде 15.000000000002
+    num_val = round(num_val, 2)
+    
+    # Используем строгий знак "<" для верхней границы, чтобы не было "дыр" между диапазонами
+    # Например, 15.4 не попадет в условие < 16, значит пойдет во второй блок.
+    if 0 <= num_val < 11:
+        return "need-level-0-10"
+    elif 11 <= num_val < 16:
+        return "need-level-11-15"
+    elif 16 <= num_val < 21:
+        return "need-level-16-20"
+    elif 21 <= num_val < 31:
+        return "need-level-21-30"
+    elif num_val >= 31:
+        return "need-level-31-100"
+    return ""
 
 @st.cache_data
 def load_region_data(file_path):
@@ -385,7 +406,6 @@ div[data-testid="stMarkdownContainer"] {{
     text-align: center !important;
 }}
 
-/* Стилизация селектора даты (убран мигающий курсор и выделение текста) */
 .date-picker-wrapper [data-baseweb="select"] {{
     background-color: #f8f9fa !important;
     border: 1px solid #e2e8f0 !important;
@@ -548,7 +568,6 @@ div.stButton, [data-testid="stColumn"], [data-testid="stVerticalBlock"] {{
 .svg-wrapper a:hover {{ transform: scale(1.015) translateY(-2px) !important; filter: drop-shadow(0px 6px 10px rgba(0, 0, 0, 0.3)) !important; position: relative; z-index: 9999 !important; }}
 .svg-wrapper a:hover path {{ fill: #3498db !important; stroke: #1f5f8b !important; }}
 
-/* Легенда карты */
 .map-legend {{ margin-top: 20px; margin-bottom: 25px; padding: 0 10px; }}
 .legend-title {{ font-family: var(--font-ui); font-size: 16px; font-weight: 600; color: #1a252c; margin-bottom: 10px; text-align: center; }}
 .legend-items {{ 
@@ -590,6 +609,13 @@ table a:hover {{ color: #004499 !important; text-decoration: underline !importan
 table tbody tr {{ transition: background-color 0.6s ease; }}
 table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }}
 
+/* --- КЛАССЫ ДЛЯ ЗАЛИВКИ ЯЧЕЕК --- */
+.need-level-0-10 {{ background-color: #88A945 !important; }}
+.need-level-11-15 {{ background-color: #D8E4BC !important; }}
+.need-level-16-20 {{ background-color: #FFFFCC !important; }}
+.need-level-21-30 {{ background-color: #FCD5B4 !important; }}
+.need-level-31-100 {{ background-color: #E6B8B7 !important; }}
+
 @keyframes rowPulse {{ 0% {{ background-color: rgba(52, 152, 219, 0.25); }} 100% {{ background-color: transparent; }} }}
 .pulse-highlight {{ animation: rowPulse 0.6s ease-out forwards; }}
 .sort-arrow {{ display: inline-block; margin-left: 8px; font-size: 15px; vertical-align: middle; }}
@@ -620,38 +646,29 @@ table tbody tr:hover {{ background-color: #f1f7fc !important; cursor: pointer; }
     margin-left: auto;
 }}
 
-/* Стили для новой таблицы весов */
-
 .weights-table {{
     margin-top: 5px !important;
-/*    border: 1px solid #e2e8f0 !important;*/
 }}
 .weights-table thead tr th {{
     background-color: #f8fafc !important;
 }}
 .weights-table tbody tr td {{
-/*    border: 1px solid #edf2f7 !important;*/
     padding: 10px !important;
-/*    text-align: center !important;    */
 }}
-/* Выделение группирующих заголовков */
 .weights-table thead tr:first-child th {{
     background-color: #f1f5f9 !important;
-/*    font-weight: 600 !important;*/
-/*    color: #334155 !important;*/
     padding: 12px !important;
 }}
 #weights tbody tr td:first-child {{
     text-align: center !important;
 }}
 
-/* Удаляем выделение заголовков */
 th {{
-    -webkit-user-select: none; /* Для Safari */
-    -moz-user-select: none;    /* Для Firefox */
-    -ms-user-select: none;     /* Для IE/Edge */
-    user-select: none;         /* Стандартный вариант */
-    cursor: pointer;           /* Указывает пользователю, что элемент кликабелен */
+    -webkit-user-select: none; 
+    -moz-user-select: none;    
+    -ms-user-select: none;     
+    user-select: none;         
+    cursor: pointer;           
 }}
 
 .footer {{
@@ -895,7 +912,8 @@ if st.session_state.page == 'home':
                     try:
                         num_val = float(str(val).replace('%', '').replace(',', '.').strip())
                         if num_val <= 1.0: num_val *= 100
-                        cells += f'<td>{num_val:.1f}%</td>'
+                        css_class = get_need_level_class(col, num_val)
+                        cells += f'<td class="{css_class}">{num_val:.1f}%</td>'
                     except:
                         cells += f'<td>{val}</td>'
                 else:
@@ -989,11 +1007,10 @@ elif st.session_state.page == 'district':
             # --- ФОРМИРОВАНИЕ СТРОКИ НСО ---
             nso_row_html = ""
             if df_nso_summary is not None and not df_nso_summary.empty:
-                nso_row = df_nso_summary.iloc[0] # Берем первую (единственную) строку
+                nso_row = df_nso_summary.iloc[0]
                 nso_cells = ""
                 for col in cols_to_show:
                     if col == "Район":
-                        # Подменяем название на "Новосибирская область"
                         nso_cells += f'<td style="font-weight: 700 !important;">Новосибирская область</td>'
                         continue
                     
@@ -1002,13 +1019,13 @@ elif st.session_state.page == 'district':
                         try:
                             num_val = float(str(val).replace('%', '').replace(',', '.').strip())
                             if num_val <= 1.0: num_val *= 100
-                            nso_cells += f'<td>{num_val:.1f}%</td>'
+                            css_class = get_need_level_class(col, num_val)
+                            nso_cells += f'<td class="{css_class}">{num_val:.1f}%</td>'
                         except:
                             nso_cells += f'<td>{val}</td>'
                     else:
                         nso_cells += f'<td>{val if pd.notna(val) else ""}</td>'
                 
-                # Добавляем стиль для визуального отделения строки области (светло-синий фон)
                 nso_row_html = f'<tr style="background-color: #e8f4f8">{nso_cells}</tr>'
 
             # --- ФОРМИРОВАНИЕ СТРОКИ РАЙОНА ---
@@ -1019,7 +1036,8 @@ elif st.session_state.page == 'district':
                     try:
                         num_val = float(str(val).replace('%', '').replace(',', '.').strip())
                         if num_val <= 1.0: num_val *= 100
-                        dist_cells += f'<td>{num_val:.1f}%</td>'
+                        css_class = get_need_level_class(col, num_val)
+                        dist_cells += f'<td class="{css_class}">{num_val:.1f}%</td>'
                     except:
                         dist_cells += f'<td>{val}</td>'
                 else:
@@ -1027,7 +1045,7 @@ elif st.session_state.page == 'district':
 
             # --- СБОРКА ИТОГОВОЙ ТАБЛИЦЫ ---
             district_table_html = f"""
-            <table>
+            <table id="districtTable">
                 <thead><tr>{dist_header_html}</tr></thead>
                 <tbody>
                     {nso_row_html}
@@ -1046,7 +1064,6 @@ elif st.session_state.page == 'district':
                 <div style="max-width: 900px; width: 100%;">
                     <table id="weights" class="weights-table" style="width: 100% !important;">
                         <thead>
-                        <!-- Добавляем новую группирующую строку -->
                         <tr style="background-color: #f1f5f9;">
                             <th colspan="2">Классификация уровня финансовой доступности</th>
                             <th colspan="2">Влияние альтернативной инфраструктуры</th>
@@ -1069,7 +1086,6 @@ elif st.session_state.page == 'district':
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            # --- "УДЕЛЬНЫЕ ВЕСА" ---
 
             st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
             st.markdown('<div class="district-section-title">Населенные пункты</div>', unsafe_allow_html=True)
@@ -1086,7 +1102,8 @@ elif st.session_state.page == 'district':
                             try:
                                 num_val = float(str(val).replace('%', '').replace(',', '.').strip())
                                 if num_val <= 1.0: num_val = num_val * 100
-                                cells += f'<td>{num_val:.1f}%</td>'
+                                css_class = get_need_level_class(col, num_val)
+                                cells += f'<td class="{css_class}">{num_val:.1f}%</td>'
                             except (ValueError, TypeError):
                                 cells += f'<td>{val}</td>'
                         else:
